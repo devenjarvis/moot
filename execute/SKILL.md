@@ -66,9 +66,10 @@ Fix issues the reviewer surfaces, then re-review with a fresh subagent if fixes 
 - Write clear commit messages
 
 **PR(s):**
-- If stacking: create PRs in dependency order, each branching from the previous
-- If single: create one PR
+- If stacking: create draft PRs in dependency order, each branching from the previous
+- If single: create one draft PR
 - PR description should summarize what changed and why
+- Always create PRs as drafts (`gh pr create --draft`)
 
 **Final verification:**
 - Run the full test suite one more time
@@ -92,6 +93,6 @@ Don't stop for:
 When stacking:
 1. Create a branch for PR1, implement, commit, push
 2. Branch PR2 off PR1's branch, implement, commit, push
-3. Create PR1 targeting main
-4. Create PR2 targeting PR1's branch
+3. Create draft PR1 targeting main
+4. Create draft PR2 targeting PR1's branch
 5. Note the dependency in each PR description
