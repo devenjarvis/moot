@@ -86,6 +86,12 @@ Then `ExitPlanMode` when done.
 
 For complex work, present the plan summary and wait for confirmation before the user moves to execution. For trivial/moderate, the plan is ready to execute immediately.
 
+### 6. Handoff to Execution
+
+After the plan is written, tell the user: "Plan ready. Say the word and I'll execute it."
+
+When the user accepts (e.g. "looks good", "do it", "go ahead", "execute", "yes", "ship it"), invoke the `execute` skill via the Skill tool before writing any code.
+
 ## Quick Reference
 
 | Complexity | Explore | Questions | Approaches | User Gate |
