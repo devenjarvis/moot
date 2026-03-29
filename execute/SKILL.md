@@ -65,15 +65,13 @@ Fix issues the reviewer surfaces, then re-review with a fresh subagent if fixes 
 - Stage and commit logical units of work
 - Write clear commit messages
 
-**PR(s):**
-- If stacking: create draft PRs in dependency order, each branching from the previous
-- If single: create one draft PR
-- PR description should summarize what changed and why
-- Always create PRs as drafts (`gh pr create --draft`)
-
 **Final verification:**
 - Run the full test suite one more time
 - Report results to the user
+
+**Hand off to ship-it:**
+- Tell the user: "Implementation complete. When you're ready to open a PR, run `/ship-it`."
+- Do NOT create the PR yourself — that's the ship-it skill's job
 
 ## Escalation
 
