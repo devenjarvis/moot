@@ -27,6 +27,8 @@ Read the files that matter. Check existing patterns, conventions, and dependenci
 
 Always explore existing patterns first. The codebase already has conventions — follow them.
 
+After exploring, re-check your complexity classification. If the exploration reveals more interconnections, unknowns, or design decisions than initially apparent, upgrade the classification and adjust accordingly (e.g., trivial → moderate means run clarifying questions before writing the plan; moderate → complex means propose approaches and wait for confirmation).
+
 ### 3. Clarify (moderate+ only)
 
 Use `AskUserQuestion` to present structured, interactive questions. Batch up to 4 questions per call. Use `multiSelect: true` when choices aren't mutually exclusive. Put your recommended option first with "(Recommended)" in the label. Add descriptions to each option explaining tradeoffs.
@@ -58,10 +60,17 @@ Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT cre
 #### Task 1: [intent, not implementation detail]
 - **Files:** exact paths
 - **What:** what this task accomplishes
+- **Done when:** [concrete, checkable condition]
 - **Boundaries:** what this task does NOT touch
 - **Constraints:** patterns to follow, edge cases to handle
 
 #### Task 2: ...
+
+### Not In Scope
+<!-- List what this plan explicitly excludes — things that might seem related but won't be touched -->
+
+### Assumptions
+<!-- List what must be true for this plan to be valid — existing functions, field nullability, service behavior, etc. -->
 
 ### Parallelism
 - Tasks [X, Y] are independent — can run as parallel subagents
@@ -70,6 +79,9 @@ Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT cre
 ### PR Boundaries
 - [If multi-concern: where to split PRs]
 - [Single concern: "Ship as one PR"]
+
+### Verification
+<!-- End-to-end steps to confirm the implementation is correct: commands to run, paths to test, observable outcomes -->
 ```
 
 Then `ExitPlanMode` when done.
@@ -80,6 +92,7 @@ Then `ExitPlanMode` when done.
 - No inline code snippets in the plan
 - Annotate which tasks can parallelize
 - Mark PR boundaries when work spans independent concerns
+- Include verification steps
 - YAGNI — plan what was asked, not what might be needed later
 
 ### 5. User Gate (complex only)
