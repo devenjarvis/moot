@@ -1,14 +1,14 @@
 # moot
 
-A pair of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) custom skills for planning and executing implementation work. Moot separates the thinking from the doing — plan first, then execute with confidence.
+A pair of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) custom skills for planning and executing implementation work. Moot separates the thinking from the doing — plan first, then build with confidence.
 
 ## Skills
 
-### `/plan`
+### `/plan-it`
 
 Turns a user request into a structured implementation plan, scaled to the complexity of the work.
 
-**Trigger phrases:** "plan this", "how should we build", "let's think through", or `/plan`
+**Trigger phrases:** "plan this", "how should we build", "let's think through", or `/plan-it`
 
 The plan skill classifies work into three tiers and adjusts its depth accordingly:
 
@@ -23,13 +23,13 @@ Plans are written to Claude Code's built-in plan file (not separate documents in
 - Parallelism annotations for independent work
 - PR boundary recommendations
 
-### `/execute`
+### `/build-it`
 
 Takes an implementation plan and runs it — dispatching parallel subagents for independent tasks, following TDD, and running code review before shipping.
 
-**Trigger phrases:** "execute", "build this", "implement the plan", or `/execute`
+**Trigger phrases:** "execute", "build this", "implement the plan", or `/build-it`
 
-The execute skill handles:
+The build-it skill handles:
 - **Plan validation** — checks that file paths and dependencies are still valid
 - **Stacked PR detection** — proposes stacked PRs when tasks span independent concerns
 - **TDD execution** — tests first, then implementation, for each task
@@ -51,10 +51,10 @@ Then register the skills in your Claude Code project or user settings. See the [
 
 ```
 moot/
-  plan/
-    SKILL.md          # Plan skill definition
-  execute/
-    SKILL.md          # Execute skill definition
+  plan-it/
+    SKILL.md          # Plan-it skill definition
+  build-it/
+    SKILL.md          # Build-it skill definition
     implementer-prompt.md  # Template for subagent dispatch
 ```
 

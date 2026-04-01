@@ -1,9 +1,9 @@
 ---
-name: execute
-description: Use when there is an implementation plan ready to execute — either from the plan skill, a user-provided plan, or an existing plan file. Triggered by "execute", "build this", "implement the plan", or /execute.
+name: build-it
+description: Use when there is an implementation plan ready to execute — either from the plan-it skill, a user-provided plan, or an existing plan file. Triggered by "execute", "build this", "implement the plan", or /build-it.
 ---
 
-# Execute
+# Build It
 
 Execute an implementation plan. Load it, run it, ship it.
 

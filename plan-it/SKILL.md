@@ -1,9 +1,9 @@
 ---
-name: plan
-description: Use when the user needs to plan work before implementation — feature requests, multi-file changes, architecture decisions, or any task where jumping straight to code would be premature. Triggered by "plan this", "how should we build", "let's think through", or /plan.
+name: plan-it
+description: Use when the user needs to plan work before implementation — feature requests, multi-file changes, architecture decisions, or any task where jumping straight to code would be premature. Triggered by "plan this", "how should we build", "let's think through", or /plan-it.
 ---
 
-# Plan
+# Plan It
 
 Turn a user request into an implementation plan scaled to its complexity.
 
@@ -90,7 +90,7 @@ For complex work, present the plan summary and wait for confirmation before the 
 
 After the plan is written, tell the user: "Plan ready. Say the word and I'll execute it."
 
-When the user accepts (e.g. "looks good", "do it", "go ahead", "execute", "yes", "ship it"), invoke the `execute` skill via the Skill tool before writing any code.
+When the user accepts (e.g. "looks good", "do it", "go ahead", "execute", "yes", "ship it"), invoke the `build-it` skill via the Skill tool before writing any code.
 
 ## Quick Reference
 

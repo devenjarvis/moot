@@ -6,7 +6,7 @@ A standalone skill that takes committed work on a branch and ships it through th
 
 ## Trigger
 
-Invoked via `/ship-it`. Also suggested by the `execute` skill upon completion.
+Invoked via `/ship-it`. Also suggested by the `build-it` skill upon completion.
 
 ## Flow
 
@@ -46,7 +46,7 @@ Invoked via `/ship-it`. Also suggested by the `execute` skill upon completion.
 
 ## Integration with Execute
 
-The `execute` skill's "Complete" section commits the work, then tells the user: "When you're ready to open a PR, run `/ship-it`."
+The `build-it` skill's "Complete" section commits the work, then tells the user: "When you're ready to open a PR, run `/ship-it`."
 
 ## Design Decisions
 
