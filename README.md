@@ -4,11 +4,11 @@ A set of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) custom sk
 
 ## Skills
 
-### `/capability-card`
+### `/spec-it`
 
 Guides a product manager through a conversation to produce a Capability Card — the atomic unit of work in an LLM-first PDLC. Replaces the traditional Jira ticket with a structured spec that product can validate and engineering can plan from.
 
-**Trigger phrases:** "write a ticket", "create a spec", "define the requirements", "help me write this up", or `/capability-card`
+**Trigger phrases:** "write a ticket", "create a spec", "define the requirements", "help me write this up", or `/spec-it`
 
 A Capability Card contains exactly what LLMs need to plan correctly:
 
@@ -68,7 +68,7 @@ Then register the skills in your Claude Code project or user settings. See the [
 
 ```
 moot/
-  capability-card/
+  spec-it/
     SKILL.md          # Capability-card skill definition
   plan-it/
     SKILL.md          # Plan-it skill definition

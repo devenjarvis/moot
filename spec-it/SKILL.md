@@ -1,6 +1,6 @@
 ---
-name: capability-card
-description: Use when a product manager or non-engineer needs to define a unit of work for engineering. Guides a conversation to produce a Capability Card — a structured spec that product can validate and engineering can plan from. Triggered by "write a ticket", "create a spec", "define the requirements", "help me write this up", or /capability-card.
+name: spec-it
+description: Use when a product manager or non-engineer needs to define a unit of work for engineering. Guides a conversation to produce a Capability Card — a structured spec that product can validate and engineering can plan from. Triggered by "write a ticket", "create a spec", "define the requirements", "help me write this up", or /spec-it.
 ---
 
 # Capability Card
