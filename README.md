@@ -1,8 +1,25 @@
 # moot
 
-A pair of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) custom skills for planning and executing implementation work. Moot separates the thinking from the doing — plan first, then build with confidence.
+A set of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) custom skills for the LLM-first product development lifecycle. Moot separates product intent from technical planning from execution — each step producing an artifact the right person can validate.
 
 ## Skills
+
+### `/capability-card`
+
+Guides a product manager through a conversation to produce a Capability Card — the atomic unit of work in an LLM-first PDLC. Replaces the traditional Jira ticket with a structured spec that product can validate and engineering can plan from.
+
+**Trigger phrases:** "write a ticket", "create a spec", "define the requirements", "help me write this up", or `/capability-card`
+
+A Capability Card contains exactly what LLMs need to plan correctly:
+
+| Section | Owner | Purpose |
+|---------|-------|---------|
+| Problem statement | Product | Who is affected and what's broken |
+| Acceptance criteria | Product | Observable, product-validatable outcomes |
+| Constraints | Product | What must NOT change |
+| Out of scope | Product | What is explicitly excluded |
+
+The skill asks clarifying questions in product language — never generating technical decisions product can't validate. The acceptance criteria from the card feed directly into `/plan-it`'s Verification section, giving both sides a shared source of truth.
 
 ### `/plan-it`
 
@@ -51,6 +68,8 @@ Then register the skills in your Claude Code project or user settings. See the [
 
 ```
 moot/
+  capability-card/
+    SKILL.md          # Capability-card skill definition
   plan-it/
     SKILL.md          # Plan-it skill definition
   build-it/
