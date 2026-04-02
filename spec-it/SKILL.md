@@ -54,7 +54,31 @@ Adapt these to what you actually need. If the user's original message answers on
 - If you catch yourself asking "should we use X or Y technology", stop. That's engineering's question.
 - "How will we build this?" is never your question. "How will you know it's built correctly?" is always your question.
 
-### 3. Write the Card
+### 3. Surface Edge Cases
+
+Before writing the card, review what you've learned from the user and identify where things can go wrong — not at the technical level, but at the product level.
+
+Think through:
+- What happens when the input is missing, incomplete, or unusual?
+- What happens when the user makes a common mistake?
+- What's the experience at the boundary of what this capability is supposed to handle?
+- What happens when the expected outcome doesn't materialize?
+
+Use `AskUserQuestion` to ask up to 3 questions in a single call — ask exactly once, this is not a loop. Pick the 1–3 failure modes most worth surfacing, not an exhaustive list.
+
+**Rules for edge case questions:**
+- Frame in product language: "What should happen when X?" not "How should the system handle error Y?"
+- Adapt to the domain: a notification feature has different edge cases than a payment flow
+- If the feature has a clear happy path, focus on what breaks that path for real users
+
+**Example questions (adapt to your context):**
+- "What should happen if [the user tries this before completing a prerequisite]?"
+- "What should the user see if [the core action fails or the data isn't available]?"
+- "Is there a case where [this works but produces a result the user wouldn't expect]?"
+
+After the user answers, incorporate any failure modes into the acceptance criteria — written as observable outcomes, not error codes.
+
+### 4. Write the Card
 
 Once you have enough to answer all four sections, produce the Capability Card. Write it as a clean artifact, not a conversation summary.
 
@@ -90,7 +114,7 @@ State them clearly so engineering doesn't build them and product doesn't expect 
 - "Out of scope" entries should be specific, not generic ("not redesigning the nav" not "no unrelated changes")
 - The card should be ~half a page when complete — if it's longer, something technical has leaked in
 
-### 4. Validate
+### 5. Validate
 
 After writing the card, ask:
 
@@ -107,7 +131,7 @@ Then iterate until product says yes.
 
 If any check fails, revise the card to fix the issue before asking for product validation.
 
-### 5. Handoff
+### 6. Handoff
 
 Once product approves the card, tell them:
 
@@ -127,6 +151,8 @@ The acceptance criteria in the card become the Verification section of the techn
 
 **Don't ask engineering questions.** "Should we cache the results?" "What's the API contract?" "How many records are we paginating?" These are not your questions in this skill.
 
+**Don't skip the edge case round.** The edge case step is not optional — it surfaces failure modes that product must own before engineering builds. If the user's initial description seems complete, that's a signal to look harder, not to skip the step.
+
 ---
 
 ## Quick Reference
@@ -138,3 +164,4 @@ The acceptance criteria in the card become the Verification section of the techn
 | "Make it faster/better/easier" | Ask: what does that look like to the user |
 | "We need to support X use case" | Ask: what would the user do that they can't do today |
 | "I can't tell you if that's right" | Something technical leaked — find it and remove it |
+| Happy-path questions are answered | Before writing, ask edge case questions (Step 3) |
