@@ -21,7 +21,7 @@ Load the plan and identify changed files:
 
 1. Read the plan file — locate the **Verification** section and each task's **Done when** conditions
 2. Run `git diff --name-only origin/main...HEAD` to get the list of changed files
-3. If no plan file is found and neither Verification nor Done when conditions exist, stop and tell the user:
+3. If no plan file is found, or if a plan exists but contains no Verification section and no Done when conditions, stop and tell the user:
    > "No AC found — run `/plan-it` first or describe what done looks like."
 
 ### 2. Code Review
@@ -35,8 +35,9 @@ Dispatch a fresh `superpowers:code-reviewer` subagent with:
   - Security issues
   - Test coverage gaps
   - Adherence to plan intent
+- Note: "The implementation may have already undergone a build-time review; focus on the final state of the files."
 
-Collect the reviewer's findings.
+Collect the reviewer's findings. If the subagent tool is unavailable, run the review inline.
 
 ### 3. AC Verification
 
