@@ -69,8 +69,8 @@ Fix issues the reviewer surfaces, then re-review with a fresh subagent if fixes 
 - Run the full test suite one more time
 - Report results to the user
 
-**Hand off to ship-it:**
-- Tell the user: "Implementation complete. When you're ready to open a PR, run `/ship-it`."
+**Hand off to validate-it:**
+- Tell the user: "Implementation complete. Run `/validate-it` to review and verify AC, then `/ship-it` to open a PR."
 - Do NOT create the PR yourself — that's the ship-it skill's job
 
 ## Escalation
