@@ -77,8 +77,7 @@ Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT cre
 - Task Z depends on X completing first
 
 ### PR Boundaries
-- [If multi-concern: where to split PRs]
-- [Single concern: "Ship as one PR"]
+- [Split: PR1 covers X, PR2 covers Y] OR [Ship as one PR]
 
 ### Verification
 <!-- End-to-end steps to confirm the implementation is correct: commands to run, paths to test, observable outcomes -->
@@ -86,12 +85,26 @@ Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT cre
 
 Then `ExitPlanMode` when done.
 
+**PR-split criteria:**
+
+Split into multiple PRs when ANY of these are true:
+- **Mixed concerns**: structural change (rename/refactor/reorganize) mixed with new behavior
+- **Independent utility**: Part A is useful/mergeable without Part B
+- **Risk asymmetry**: one part is safe/routine, another is experimental or high-risk
+- **Unblocking**: Part A unblocks a teammate and doesn't need to ship with Part B
+- **Size**: a single PR would exceed ~500 lines of substantive logic
+
+Otherwise, keep as one PR when:
+- All tasks serve the same feature or fix
+- Tasks are sequentially dependent (B is meaningless without A)
+- Splitting would leave the repo in a partial/broken state
+
 **Plan principles:**
 - Tasks describe intent and boundaries, not step-by-step code
 - Every task lists exact file paths
 - No inline code snippets in the plan
 - Annotate which tasks can parallelize
-- Mark PR boundaries when work spans independent concerns
+- Apply PR-split criteria (above) to determine boundaries
 - Include verification steps
 - YAGNI — plan what was asked, not what might be needed later
 
