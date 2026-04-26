@@ -11,7 +11,7 @@ Execute an implementation plan. Load it, run it, ship it.
 
 ### 1. Load and Sanity Check
 
-Read the plan from Claude's built-in plan file (or from wherever the user points you).
+Read the plan from Claude's built-in plan file, `.claude/plan.md` (when starting in a fresh session without an in-context plan), or from wherever the user points you.
 
 Quick sanity check:
 - Are file paths still valid? (files may have changed since planning)
