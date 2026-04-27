@@ -19,9 +19,15 @@ Validate completed implementation before opening a PR: code review + AC traceabi
 
 Load the plan and identify changed files:
 
-1. Read the plan file — locate the **Verification** section and each task's **Done when** conditions
+1. Locate the plan using this priority order:
+   - Check `.claude/plan.md` in the working directory — if found, announce "Loading plan from `.claude/plan.md`" and use it
+   - Fall back to Claude's built-in plan context (in-session) — if found, announce "Loading plan from session context" and use it
+   - If neither source exists, stop and tell the user:
+     > "No plan found — run `/plan-it` first or describe what done looks like."
+
+   Once a plan is loaded, locate the **Verification** section and each task's **Done when** conditions.
 2. Run `git diff --name-only origin/main...HEAD` to get the list of changed files
-3. If no plan file is found, or if a plan exists but contains no Verification section and no Done when conditions, stop and tell the user:
+3. If the plan contains no Verification section and no Done when conditions, stop and tell the user:
    > "No AC found — run `/plan-it` first or describe what done looks like."
 
 ### 2. Code Review
@@ -44,7 +50,8 @@ Collect the reviewer's findings. If the subagent tool is unavailable, run the re
 Use the acceptance criteria loaded in Step 1. Priority order:
 1. Plan **Verification** section (preferred — most explicit)
 2. Task **Done when** conditions
-3. If neither exists: stop with the message from Step 1
+3. If neither exists: stop and tell the user:
+   > "No AC found — run `/plan-it` first or describe what done looks like."
 
 For each criterion:
 - Identify the specific code, file, or output that addresses it

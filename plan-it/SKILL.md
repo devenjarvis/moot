@@ -45,7 +45,7 @@ Adapt the questions to what you actually need to know — don't ask questions yo
 
 ### 4. Write Plan
 
-Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT create separate plan documents in the repo.
+Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT create separate plan documents in the repo (`.claude/plan.md` is the only exception — it's local infrastructure, not committed to git).
 
 **Plan format:**
 
@@ -84,7 +84,7 @@ Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do NOT cre
 <!-- End-to-end steps to confirm the implementation is correct: commands to run, paths to test, observable outcomes -->
 ```
 
-Then `ExitPlanMode` when done.
+Then `ExitPlanMode` when done. After ExitPlanMode, also write the plan content to `.claude/plan.md` using the Write tool — this is the cross-session handoff artifact for build-it and validate-it.
 
 **Plan principles:**
 - Tasks describe intent and boundaries, not step-by-step code
