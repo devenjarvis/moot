@@ -1,6 +1,6 @@
 ---
 name: plan-it
-description: Use when the user needs to plan work before implementation — feature requests, multi-file changes, architecture decisions, or any task where jumping straight to code would be premature. Triggered by "plan this", "how should we build", "let's think through", or /plan-it.
+description: Use BEFORE implementation for any non-trivial task when no plan exists in context — feature requests, multi-file changes, architecture decisions, refactors, or any change where jumping straight to code would be premature. Check this skill before build-it. Triggered by "add X", "implement X", "build X", "let's add", "how should we", "plan this", "let's think through", or /plan-it.
 ---
 
 # Plan It
