@@ -9,7 +9,7 @@ Turn a product intent into a structured spec that product can validate and engin
 
 ## What a Capability Card Is
 
-A Capability Card is the atomic unit of work in an LLM-first PDLC. It replaces the traditional Jira ticket — not by adding more fields, but by making the right content explicit:
+The atomic unit of work in an LLM-first PDLC. It replaces the traditional Jira ticket — not by adding fields, but by making the right content explicit and nothing else:
 
 | Section | Owner | Purpose |
 |---------|-------|---------|
@@ -20,69 +20,30 @@ A Capability Card is the atomic unit of work in an LLM-first PDLC. It replaces t
 
 Product can validate all four. Engineering and LLMs fill in the technical approach below this line — but only after this artifact is signed off.
 
-**The boundary rule:** If product says "I can't tell you if that's right," something technical has leaked into the card. That's a boundary violation — remove it.
-
----
-
-## Process
+**The boundary rule:** if product says "I can't tell you if that's right," something technical has leaked into the card. Find it and remove it. This rule governs everything below — the questions you ask, the criteria you write, and the card you produce.
 
 ### 1. Listen
 
-The user tells you what they want — often loosely, in their own words. That's fine. Your job is not to clean it up yet. Read it and identify what's missing:
+Read what the user gave you in their own words. Identify what's missing: who has the problem, what the testable outcome is, what could be misread as a technical decision, and whether the boundaries are explicit or assumed.
 
-- Is it clear who has the problem?
-- Is there a testable outcome stated?
-- Is there anything that could be misread as a technical decision?
-- Are the boundaries explicit, or assumed?
+### 2. Ask
 
-### 2. Ask — Don't Assume
+Use `AskUserQuestion` for what you can't infer, in product language. Four topics drive a Capability Card:
 
-Use `AskUserQuestion` to surface the gaps. Ask only what you can't infer. Batch up to 4 questions per call. These are conversational, free-text questions — not structured choices. The user answers in their own words; that's the point.
+- **Problem framing** — who experiences this, and the impact when it isn't solved
+- **Done signal** — what they'll be able to do, or stop doing, that they can't today
+- **Constraints** — what must stay exactly as it is
+- **Scope boundary** — what related things they are explicitly not solving
 
-**The four questions that drive a Capability Card:**
-
-1. **Problem framing** — "Who experiences this problem, and what's the impact when it's not solved?"
-2. **Done signal** — "How will you know this is done? What will you be able to do (or stop doing) that you can't (or have to) do today?"
-3. **Constraints** — "What must stay exactly as it is? What would a successful outcome break that you'd consider unacceptable?"
-4. **Scope boundary** — "What related things are you explicitly NOT trying to solve here?"
-
-Adapt these to what you actually need. If the user's original message answers one, skip it.
-
-**Rules for questions:**
-- Ask in product language, not engineering language
-- Do not ask about implementation, architecture, or technical approach — ever
-- If you catch yourself asking "should we use X or Y technology", stop. That's engineering's question.
-- "How will we build this?" is never your question. "How will you know it's built correctly?" is always your question.
+Adapt them to what you actually need; skip any the user's first message already answered.
 
 ### 3. Surface Edge Cases
 
-Before writing the card, review what you've learned from the user and identify where things can go wrong — not at the technical level, but at the product level.
-
-Think through:
-- What happens when the input is missing, incomplete, or unusual?
-- What happens when the user makes a common mistake?
-- What's the experience at the boundary of what this capability is supposed to handle?
-- What happens when the expected outcome doesn't materialize?
-
-Use `AskUserQuestion` to ask up to 3 questions in a single call — ask exactly once, this is not a loop. Pick the 1–3 failure modes most worth surfacing, not an exhaustive list.
-
-**Rules for edge case questions:**
-- Frame in product language: "What should happen when X?" not "How should the system handle error Y?"
-- Adapt to the domain: a notification feature has different edge cases than a payment flow
-- If the feature has a clear happy path, focus on what breaks that path for real users
-
-**Example questions (adapt to your context):**
-- "What should happen if [the user tries this before completing a prerequisite]?"
-- "What should the user see if [the core action fails or the data isn't available]?"
-- "Is there a case where [this works but produces a result the user wouldn't expect]?"
-
-After the user answers, incorporate any failure modes into the acceptance criteria — written as observable outcomes, not error codes.
+Do this before writing, always. Find where things go wrong at the product level — missing or unusual input, common user mistakes, the boundary of what this capability covers, the expected outcome failing to materialize. Ask the 1–3 failure modes most worth surfacing in a single round, framed as "what should happen when X." If the user's description seems complete, that's a signal to look harder, not to skip the round. Fold their answers into the acceptance criteria as observable outcomes.
 
 ### 4. Write the Card
 
-Once you have enough to answer all four sections, produce the Capability Card. Write it as a clean artifact, not a conversation summary.
-
-**Format:**
+Produce a clean artifact, not a conversation summary:
 
 ```markdown
 ## [Short title — one line, active voice]
@@ -108,60 +69,16 @@ Things that might seem related but are not part of this card.
 State them clearly so engineering doesn't build them and product doesn't expect them.]
 ```
 
-**Writing rules:**
-- Acceptance criteria must be testable by product without engineering help
-- If a criterion implies a technical decision, rewrite it to describe the observable outcome instead
-- "Out of scope" entries should be specific, not generic ("not redesigning the nav" not "no unrelated changes")
-- The card should be ~half a page when complete — if it's longer, something technical has leaked in
+Out-of-scope entries should be specific ("not redesigning the nav," not "no unrelated changes").
 
 ### 5. Validate
 
-After writing the card, ask:
+Before showing the card, check it silently and fix what fails: an engineer could start building without calling the PM, a PM could verify done without asking an engineer, and the card is under ~300 words — length past that means something technical leaked in.
 
-> "Does this capture what you meant? Is there anything that's missing or that I've gotten wrong?"
-
-Then iterate until product says yes.
-
-**Validation check (run silently before asking — fix any failures before proceeding):**
-- Could an engineer start building from this without calling the PM? (Good)
-- Could a PM verify that the build is done without asking an engineer? (Good)
-- Does the card say *how* anything should be built? (Bad — remove it)
-- Are any acceptance criteria only checkable by reading code or running technical tests? (Bad — rewrite them)
-- Is the card longer than ~300 words? (Bad — something technical has leaked in, trim it)
-
-If any check fails, revise the card to fix the issue before asking for product validation.
+Then ask: "Does this capture what you meant? Is anything missing or wrong?" Iterate until product says yes.
 
 ### 6. Handoff
 
-Once product approves the card, tell them:
-
 > "Capability Card ready. Hand this to engineering with: 'Feed this into plan-it to get a technical implementation plan.'"
 
-The acceptance criteria in the card become the Verification section of the technical plan. Both sides use the same source of truth.
-
----
-
-## What NOT to Do
-
-**Don't generate technical answers.** If the user says "we need faster search," don't say "we could add an index" or "we could switch to Elasticsearch." Say "What does 'fast enough' look like to a user? How would they notice the difference?"
-
-**Don't add implementation notes.** No "this will require changes to the API" or "the database schema will need updating." That's plan-it's job.
-
-**Don't write acceptance criteria that require code to verify.** "The query returns results in under 200ms" is an engineering metric. "Users see results before they finish typing" is a product criterion.
-
-**Don't ask engineering questions.** "Should we cache the results?" "What's the API contract?" "How many records are we paginating?" These are not your questions in this skill.
-
-**Don't skip the edge case round.** The edge case step is not optional — it surfaces failure modes that product must own before engineering builds. If the user's initial description seems complete, that's a signal to look harder, not to skip the step.
-
----
-
-## Quick Reference
-
-| You're hearing... | Your response |
-|-------------------|---------------|
-| "We need to build X" | Ask: who has the problem, how will they know it's solved |
-| "It should work like..." | Ask: how will you recognize it's working correctly |
-| "Make it faster/better/easier" | Ask: what does that look like to the user |
-| "We need to support X use case" | Ask: what would the user do that they can't do today |
-| "I can't tell you if that's right" | Something technical leaked — find it and remove it |
-| Happy-path questions are answered | Before writing, ask edge case questions (Step 3) |
+The card's acceptance criteria become the Verification section of the technical plan. Both sides use the same source of truth.

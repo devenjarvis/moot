@@ -1,91 +1,68 @@
 ---
 name: ship-it
 description: >
-  Open a draft PR, monitor CI checks, fix failures, and mark ready for review.
-  Use when implementation is complete and you want to ship via PR. Triggered by
-  "ship it", "open a PR", or /ship-it.
+  Quality gate and PR pipeline in one. Reviews the code, verifies acceptance
+  criteria against the plan, fixes what it finds, then commits, opens a draft PR,
+  drives CI green, and marks it ready. Use when implementation is complete.
+  Triggered by "validate it", "validate this", "run validation", "ship it",
+  "open a PR", or /ship-it.
 ---
 
 # Ship It
 
-Ship the current branch through the PR pipeline: commit, draft PR, fix CI, mark ready.
+Validate the work, fix what's broken, get the user's go-ahead, then ship it through CI.
 
-**Announce at start:** "Using ship-it to open a draft PR and get it through CI."
+**Announce at start:** "Using ship-it to validate the implementation and open a PR."
 
-## Process
+## 1. Load Context
 
-### 1. Prepare
+Read the plan from `{worktree-root}/.claude/plan.md`, falling back to the in-session plan context. Never `~/.claude/plan.md`. Say which source you loaded.
 
-Stage and commit any outstanding work:
+If neither source exists — or the plan has no **Verification** section and no per-task **Done when** conditions — stop and tell the user:
 
-1. Run `git status` and `git diff` to see what needs to be committed
-2. If there are unstaged or uncommitted changes:
-   - Stage the changes
-   - Run `git log --oneline -10` to match the repo's commit message style
-   - Commit with a clear message
-3. If everything is already committed, skip to push
-4. Push to remote — use `git push -u origin HEAD` to set upstream if needed
+> "No plan found — run `/plan-it` first or describe what done looks like."
 
-If the branch has no commits ahead of main, stop and tell the user there's nothing to ship.
+Then get the changed files: `git diff --name-only origin/main...HEAD`.
 
-### 2. Open Draft PR
+## 2. Review and Verify
 
-1. Check for a PR template in the repo. Look in these locations (first match wins):
-   - `.github/pull_request_template.md`
-   - `.github/PULL_REQUEST_TEMPLATE.md`
-   - `docs/pull_request_template.md`
-   - `.github/PULL_REQUEST_TEMPLATE/` directory (if multiple templates exist, use the default)
-2. Auto-generate the PR title from the branch name and commit history — keep it under 70 characters
-3. Auto-generate the PR description:
-   - If a repo template was found, fill it in based on the changes
-   - If no template, use this format:
-     ```
-     ## Summary
-     <bullet points describing what changed and why>
+**Code review:** dispatch a fresh `superpowers:code-reviewer` subagent with the changed files and the plan, checking for bugs and logic errors, convention violations, security issues, test coverage gaps, and adherence to plan intent. Tell it the code may already have had a build-time review, so it should focus on the final state of the files. Never review your own work in this session; if subagents are unavailable, say so and review inline.
 
-     ## Test plan
-     <how to verify the changes>
-     ```
-4. Create the draft PR:
-   ```
-   gh pr create --draft --title "<title>" --base main --body "<description>"
-   ```
-5. Print the draft PR URL for the user
+**Acceptance criteria:** take them from the plan's **Verification** section; fall back to the tasks' **Done when** conditions. For each criterion, find the code or output that addresses it, run something that confirms it, and mark it PASS, FAIL, or PARTIAL.
 
-### 3. Poll-Fix Loop
+## 3. Fix
 
-Monitor CI checks and fix any failures:
+Fix the review findings and every FAIL/PARTIAL criterion, then re-run the checks that were failing. Escalate to the user only if a fix requires a decision the plan doesn't cover.
 
-1. **Poll** — Run `gh pr checks` to get the status of all checks
-   - If any checks are still pending/in-progress, wait 30 seconds and poll again
-   - If all checks passed, go to Step 4
-   - If any checks failed, proceed to diagnose
+## 4. Report and Gate
 
-2. **Diagnose** — For each failed check:
-   - Use `gh run view <run-id> --log-failed` to read the failure logs
-   - Identify the root cause of each failure
+Show the user:
 
-3. **Fix** — Batch all fixes together:
-   - Fix all identified issues
-   - Run any relevant local checks (tests, linting, type checking) to verify fixes before pushing
-   - Stage, commit, and push the fixes in a single commit
-   - Message format: "Fix CI: <brief description of what was fixed>"
+- **Code review** — the findings and what you fixed, or "No issues found."
+- **AC verification** — a table of criterion / PASS·FAIL·PARTIAL / evidence, reflecting the state after fixes.
 
-4. **Re-poll** — Return to step 1 and wait for the new checks to run
+Then **wait for explicit approval before opening the PR.** This is the one hard gate — do not commit-and-push your way past it.
 
-There is no iteration cap. Keep going until all checks pass.
+## 5. Open the Draft PR
 
-### 4. Mark Ready and Report
+Commit any outstanding work in the repo's commit-message style and push, setting upstream if needed. If the branch has no commits ahead of main, stop and say there's nothing to ship.
 
-Once all checks pass:
+Check the repo for a PR template and fill it in if one exists. Otherwise:
 
-1. Mark the PR as ready for review:
-   ```
-   gh pr ready
-   ```
+```
+## Summary
+<bullet points describing what changed and why>
 
-2. Print a summary to the user:
-   - PR title and URL
-   - What the PR contains (brief summary of changes)
-   - If any CI fixes were needed: which checks failed and what was fixed
-   - If no fixes were needed: note that all checks passed on the first try
+## Test plan
+<how to verify the changes>
+```
+
+Title comes from the branch and commit history, under 70 characters. Create it with `gh pr create --draft --base main` and print the URL.
+
+## 6. Drive CI Green
+
+Poll `gh pr checks`. On failure, read the logs (`gh run view <run-id> --log-failed`), find the root cause, batch all fixes into one commit, verify locally before pushing, and push. Repeat until every check passes — no iteration cap.
+
+## 7. Mark Ready
+
+`gh pr ready`, then summarize: PR title and URL, what it contains, and which checks failed and how you fixed them — or that CI passed on the first try.

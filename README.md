@@ -40,6 +40,8 @@ Plans are written to Claude Code's built-in plan file (not separate documents in
 - Parallelism annotations for independent work
 - PR boundary recommendations
 
+Every plan is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session.
+
 ### `/build-it`
 
 Takes an implementation plan and runs it — dispatching parallel subagents for independent tasks, following TDD, and running code review before shipping.
@@ -53,6 +55,20 @@ The build-it skill handles:
 - **Parallel dispatch** — independent tasks run as subagents using a structured implementer prompt
 - **Automated code review** — dispatches a reviewer subagent before shipping
 - **Escalation** — stops and asks when requirements are ambiguous or scope grows unexpectedly
+
+Build-it never opens the PR itself — it hands off to `/ship-it`.
+
+### `/ship-it`
+
+The gate between a finished implementation and a merged PR: validate → fix → approve → PR → CI. (This skill absorbed the former `/validate-it`, so the review and the ship are one step instead of two.)
+
+**Trigger phrases:** "validate it", "run validation", "ship it", "open a PR", or `/ship-it`
+
+1. **Validate** — a fresh reviewer subagent reviews the changed files, and each acceptance criterion from the plan's Verification section (or the tasks' "Done when" conditions) is checked and marked PASS, FAIL, or PARTIAL
+2. **Fix** — findings and failing criteria are fixed automatically, then re-verified
+3. **Gate** — you get the review findings and the AC table, and nothing is pushed until you approve
+4. **PR** — commits, pushes, and opens a draft PR, filling in the repo's PR template if it has one
+5. **CI** — polls checks, diagnoses failures, pushes fixes, and repeats until green, then marks the PR ready for review
 
 ## Installation
 
@@ -75,6 +91,8 @@ moot/
   build-it/
     SKILL.md          # Build-it skill definition
     implementer-prompt.md  # Template for subagent dispatch
+  ship-it/
+    SKILL.md          # Ship-it skill definition (validate + PR + CI)
 ```
 
 ## License
