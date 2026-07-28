@@ -5,92 +5,46 @@ description: Use when there is an implementation plan ready to execute — eithe
 
 # Build It
 
-Execute an implementation plan. Load it, run it, ship it.
+Execute an implementation plan.
 
-## Process
+## 1. Load the Plan
 
-### 1. Load and Sanity Check
+Read `{worktree-root}/.claude/plan.md`, falling back to the in-session plan context, or wherever the user points you. Never `~/.claude/plan.md`.
 
-Read the plan from Claude's built-in plan file, `.claude/plan.md` (when starting in a fresh session without an in-context plan), or from wherever the user points you.
+Sanity check it against the current code: are the file paths still valid, do the task dependencies still make sense, does anything conflict with what's on disk now? Flag what's off and adjust — don't re-plan from scratch.
 
-Quick sanity check:
-- Are file paths still valid? (files may have changed since planning)
-- Are there obvious conflicts with current code state?
-- Do task dependencies make sense?
+## 2. Detect Stacked PR Opportunity
 
-If something is off, flag it briefly and adjust. Don't re-plan from scratch.
+Propose stacking when all four hold: tasks span 2+ independent concerns, file sets don't overlap between them, the total change likely exceeds ~500 lines, and each concern is independently reviewable.
 
-### 2. Detect Stacked PR Opportunity
+Ask: "This looks like it could stack as [PR1: description] -> [PR2: description]. Want to stack, or ship as one?" Otherwise ship as one PR.
 
-Check if the plan should ship as stacked PRs. Heuristic — propose stacking when ALL of:
-- Tasks span 2+ independent concerns
-- File sets don't overlap between concerns
-- Total change likely exceeds ~500 lines
-- Each concern is independently reviewable
+When stacking, each PR branches off and targets the one below it, with the dependency noted in its description.
 
-If stacking applies, propose it to the user: "This looks like it could stack as [PR1: description] -> [PR2: description]. Want to stack, or ship as one?"
+## 3. Execute Tasks
 
-If the user declines or it doesn't apply, ship as one PR.
+TDD for every task: tests first, watch them fail for the right reason, implement, watch them pass.
 
-### 3. Execute Tasks
+Tasks the plan marks independent go to parallel subagents via the Agent tool, each dispatched with `./implementer-prompt.md` filled in from the plan. Sequential and dependent tasks run inline.
 
-Follow TDD for each task: write/update tests first, verify they fail, implement, verify they pass.
+After each task or parallel group, verify before moving on — run the tests, check types, confirm the behavior. Fix a failure before proceeding.
 
-**For independent tasks (marked parallel in plan):**
-Dispatch subagents using the Agent tool. Each subagent gets the implementer prompt from `./implementer-prompt.md` filled with:
-- Task description and context from the plan
-- Relevant file paths and constraints
-- What "done" looks like
+As each task verifies, tick its `- [ ]` to `- [x]` in `{worktree-root}/.claude/plan.md` so a fresh session can see what already landed. Only the dispatching session writes that file — implementer subagents never touch it, or concurrent writes will corrupt it.
 
-**For sequential/dependent tasks:**
-Execute inline in the main conversation. Work through each task, verify it works before moving to the next.
+## 4. Review
 
-**After each task or parallel group:**
-- Verify the work: run tests, check types, confirm behavior
-- If a task fails verification, fix it before proceeding
-- Update plan progress (mark tasks complete)
+Dispatch a fresh subagent (`subagent_type: "superpowers:code-reviewer"` or `"feature-dev:code-reviewer"`) with the plan, the changed files, and instructions to check plan-intent match, test coverage, bugs, security issues, and pattern adherence.
 
-### 4. Review
+**Never review your own work in the originating session.** Fix what the reviewer surfaces, then re-review with a fresh subagent if the fixes were non-trivial.
 
-Dispatch a fresh subagent (using `subagent_type: "superpowers:code-reviewer"` or `"feature-dev:code-reviewer"`) for review — never review your own work in the originating session. The reviewer gets:
-- The plan (what was intended)
-- The list of changed files
-- Instructions to check: plan intent match, test coverage, bugs, security issues, pattern adherence
+## 5. Complete
 
-Fix issues the reviewer surfaces, then re-review with a fresh subagent if fixes were non-trivial.
+Commit logical units of work with clear messages, run the full test suite once more, and report the results.
 
-### 5. Complete
+Then hand off: "Implementation complete. Run `/ship-it` to validate, fix, and open a PR."
 
-**Commit:**
-- Stage and commit logical units of work
-- Write clear commit messages
-
-**Final verification:**
-- Run the full test suite one more time
-- Report results to the user
-
-**Hand off to validate-it:**
-- Tell the user: "Implementation complete. Run `/validate-it` to review and verify AC, then `/ship-it` to open a PR."
-- Do NOT create the PR yourself — that's the ship-it skill's job
+Do not create the PR yourself — that's ship-it's job.
 
 ## Escalation
 
-Stop and ask the user when:
-- Requirements are ambiguous and the plan doesn't resolve it
-- Tests fail in non-obvious ways (not just a typo fix)
-- Scope is larger than the plan anticipated
-- You discover a design decision the plan didn't address
-
-Don't stop for:
-- Minor implementation choices the plan already decided
-- Standard error handling
-- Import organization or formatting
-
-## Stacked PR Mechanics
-
-When stacking:
-1. Create a branch for PR1, implement, commit, push
-2. Branch PR2 off PR1's branch, implement, commit, push
-3. Create draft PR1 targeting main
-4. Create draft PR2 targeting PR1's branch
-5. Note the dependency in each PR description
+Stop and ask the user when requirements are ambiguous and the plan doesn't resolve it, when tests fail in non-obvious ways, when scope turns out larger than the plan anticipated, or when you hit a design decision the plan didn't address.
