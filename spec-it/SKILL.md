@@ -81,4 +81,4 @@ Then ask: "Does this capture what you meant? Is anything missing or wrong?" Iter
 
 > "Capability Card ready. Hand this to engineering with: 'Feed this into plan-it to get a technical implementation plan.'"
 
-The card's acceptance criteria become the Verification section of the technical plan. Both sides use the same source of truth.
+The card's acceptance criteria become the `Spec` section of the technical plan. Both sides use the same source of truth.

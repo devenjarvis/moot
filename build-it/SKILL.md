@@ -29,6 +29,8 @@ Tasks the plan marks independent go to parallel subagents via the Agent tool, ea
 
 After each task or parallel group, verify before moving on — run the tests, check types, confirm the behavior. Fix a failure before proceeding.
 
+As each task verifies, tick its `- [ ]` to `- [x]` in `{worktree-root}/.claude/plan.md` so a fresh session can see what already landed. Only the dispatching session writes that file — implementer subagents never touch it, or concurrent writes will corrupt it.
+
 ## 4. Review
 
 Dispatch a fresh subagent (`subagent_type: "superpowers:code-reviewer"` or `"feature-dev:code-reviewer"`) with the plan, the changed files, and instructions to check plan-intent match, test coverage, bugs, security issues, and pattern adherence.

@@ -35,10 +35,9 @@ The plan skill classifies work into three tiers and adjusts its depth accordingl
 | Moderate   | Targeted    | Batched   | None       | No        |
 | Complex    | Deep        | Batched   | 2-3 options| Yes       |
 
-Plans are written to Claude Code's built-in plan file (not separate documents in your repo) and include:
-- Tasks with intent, file paths, and boundaries
-- Parallelism annotations for independent work
-- PR boundary recommendations
+Plans are written to Claude Code's built-in plan file (not separate documents in your repo). A full plan carries ten sections — Goal, Spec, Context, Reuse, Risks, Tasks, Parallelism, PR Boundaries, Verification, Not In Scope — and lighter tiers emit a subset: trivial plans skip Context, Reuse, and Risks.
+
+Tasks are checkboxes, each carrying the files it touches (cited `file:line`), the test to write first, the change to make, how to verify it, and what it must not touch. `/build-it` ticks the boxes as it goes, so the plan doubles as a progress ledger across sessions.
 
 Every plan is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session.
 
@@ -64,7 +63,7 @@ The gate between a finished implementation and a merged PR: validate → fix →
 
 **Trigger phrases:** "validate it", "run validation", "ship it", "open a PR", or `/ship-it`
 
-1. **Validate** — a fresh reviewer subagent reviews the changed files, and each acceptance criterion from the plan's Verification section (or the tasks' "Done when" conditions) is checked and marked PASS, FAIL, or PARTIAL
+1. **Validate** — a fresh reviewer subagent reviews the changed files, and each acceptance criterion from the plan's Spec items (falling back to its Verification section, then the tasks' `Verify:` bullets) is checked and marked PASS, FAIL, or PARTIAL
 2. **Fix** — findings and failing criteria are fixed automatically, then re-verified
 3. **Gate** — you get the review findings and the AC table, and nothing is pushed until you approve
 4. **PR** — commits, pushes, and opens a draft PR, filling in the repo's PR template if it has one

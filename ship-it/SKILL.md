@@ -18,7 +18,7 @@ Validate the work, fix what's broken, get the user's go-ahead, then ship it thro
 
 Read the plan from `{worktree-root}/.claude/plan.md`, falling back to the in-session plan context. Never `~/.claude/plan.md`. Say which source you loaded.
 
-If neither source exists — or the plan has no **Verification** section and no per-task **Done when** conditions — stop and tell the user:
+If neither source exists — or the plan has no **Spec** section, no **Verification** section, and no per-task verification conditions — stop and tell the user:
 
 > "No plan found — run `/plan-it` first or describe what done looks like."
 
@@ -28,7 +28,7 @@ Then get the changed files: `git diff --name-only origin/main...HEAD`.
 
 **Code review:** dispatch a fresh `superpowers:code-reviewer` subagent with the changed files and the plan, checking for bugs and logic errors, convention violations, security issues, test coverage gaps, and adherence to plan intent. Tell it the code may already have had a build-time review, so it should focus on the final state of the files. Never review your own work in this session; if subagents are unavailable, say so and review inline.
 
-**Acceptance criteria:** take them from the plan's **Verification** section; fall back to the tasks' **Done when** conditions. For each criterion, find the code or output that addresses it, run something that confirms it, and mark it PASS, FAIL, or PARTIAL.
+**Acceptance criteria:** take them from the plan's **Spec** items first, then its **Verification** section, then the per-task **Verify:** bullets (**Done when:** in older plans). For each criterion, find the code or output that addresses it, run something that confirms it, and mark it PASS, FAIL, or PARTIAL.
 
 ## 3. Fix
 

@@ -11,11 +11,11 @@ Turn a user request into an implementation plan scaled to its complexity.
 
 Classify the request silently. The tier sets the depth of every step that follows:
 
-| Complexity | Explore | Questions | Approaches | User Gate |
-|-----------|---------|-----------|------------|-----------|
-| **Trivial** — single file, obvious change | Glance at the target file | None | None | No |
-| **Moderate** — 2–5 files, some design decisions | Target files + immediate dependencies, existing patterns | Batched into one round | None | No |
-| **Complex** — cross-cutting, architectural | Deep; Explore agents in parallel, map the dependency graph | Batched into one round | 2–3 with tradeoffs and a recommendation | Yes |
+| Complexity | Explore | Questions | Approaches | User Gate | Sections it owes |
+|-----------|---------|-----------|------------|-----------|------------------|
+| **Trivial** — single file, obvious change | Glance at the target file | None | None | No | Goal, Spec, Tasks, Verification, Not In Scope |
+| **Moderate** — 2–5 files, some design decisions | Target files + immediate dependencies, existing patterns | Batched into one round | None | No | Those plus Context, Reuse, Risks |
+| **Complex** — cross-cutting, architectural | Deep; Explore agents in parallel, map the dependency graph | Batched into one round | 2–3 with tradeoffs and a recommendation | Yes | All of them, in depth |
 
 ### 2. Explore
 
@@ -29,42 +29,51 @@ Use `AskUserQuestion` for what you genuinely can't answer from the codebase. For
 
 Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do not create separate plan documents in the repo.
 
+The plan has two readers: a coding agent that will execute it end to end, and a human scanning it for correctness before approving. The human reads Goal, Spec, and the task names; the agent reads the per-task sub-bullets. Emit the sections the tier owes, in this order:
+
 ```
-## [Feature/Change Name]
+# Goal
+<exactly one sentence: what the user is trying to accomplish>
 
-### Context
-[1-3 sentences: what and why]
+## Spec
+<numbered acceptance criteria, one line each, ~12 max — each a sentence that could become an assertion. No vague verbs ("handles", "supports") without a measurable subject. If you need more than ~12, the change is too large for one plan: split it and say so in Not In Scope.>
 
-### Tasks
+## Context
+<one fact per bullet: what part of the system this touches, cited file:line, plus architectural constraints and local conventions ("this package uses table-driven tests")>
 
-#### Task 1: [intent, not implementation detail]
-- **Files:** exact paths
-- **What:** what this task accomplishes
-- **Done when:** [concrete, checkable condition]
-- **Boundaries:** what this task does NOT touch
-- **Constraints:** patterns to follow, edge cases to handle
+## Reuse
+<existing helpers, types, and patterns to build on rather than recreate, cited by path or symbol. If nothing suitable exists, say so — the absence is a finding.>
 
-#### Task 2: ...
+## Risks
+<architectural unknowns, external API contracts, concurrency hazards, tests that will need updating, and the load-bearing assumptions the building agent should probe early>
 
-### Not In Scope
-<!-- List what this plan explicitly excludes — things that might seem related but won't be touched -->
+## Tasks
 
-### Assumptions
-<!-- List what must be true for this plan to be valid — existing functions, field nullability, service behavior, etc. -->
+- [ ] <imperative short phrase — "Add --json flag to doctor", not a paragraph>
+  - Files: path/to/file.ts:42, path/to/other.ts:88
+  - Signatures: <the new or changed signature — omit this bullet entirely if none>
+  - Test first: <failing test to write, its path, the case it covers, and the expected failure>
+  - Implement: <1–3 sentences on the production change>
+  - Verify: <command that must pass and what confirms it — or "manual: <specific check>">
+  - Boundaries: <what this task does NOT touch>
 
-### Parallelism
+- [ ] <next task>
+
+## Parallelism
 - Tasks [X, Y] are independent — can run as parallel subagents
 - Task Z depends on X completing first
 
-### PR Boundaries
-- [If multi-concern: where to split PRs]
-- [Single concern: "Ship as one PR"]
+## PR Boundaries
+<where to split when the work spans independent concerns, or "Ship as one PR">
 
-### Verification
-<!-- End-to-end steps to confirm the implementation is correct: commands to run, paths to test, observable outcomes -->
+## Verification
+<end-to-end checks once every task is done: concrete commands and expected outcomes, not prose>
+
+## Not In Scope
+<what this plan deliberately excludes — name the slice you're cutting and why>
 ```
 
-Plan principles: tasks describe intent and boundaries, never step-by-step code; every task lists exact file paths; no inline code snippets; annotate what can parallelize; mark PR boundaries when work spans independent concerns; YAGNI — plan what was asked, not what might be needed later.
+Plan principles: tasks describe intent and boundaries, never step-by-step code; cite `file:line` in Context and in each task's `Files:`, not bare paths; `- [ ]` checkboxes appear only inside Tasks, and sub-bullets are plain two-space-indented `  - ` lines; every task is test-first, and a task with no meaningful test says so explicitly in `Verify:` rather than omitting verification; no placeholder language — "TBD", "similar to task N", "appropriate error handling", "as needed"; there is no word cap for moderate and complex plans, since length comes from completeness, not padding; YAGNI — plan what was asked, not what might be needed later.
 
 Then `ExitPlanMode`.
 
