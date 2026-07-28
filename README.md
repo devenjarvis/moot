@@ -35,7 +35,7 @@ The plan skill classifies work into three tiers and adjusts its depth accordingl
 | Moderate   | Targeted    | Batched   | None       | No        |
 | Complex    | Deep        | Batched   | 2-3 options| Yes       |
 
-Plans are written to Claude Code's built-in plan file (not separate documents in your repo). A full plan carries ten sections — Goal, Spec, Context, Reuse, Risks, Tasks, Parallelism, PR Boundaries, Verification, Not In Scope — and lighter tiers emit a subset: trivial plans skip Context, Reuse, and Risks.
+Plans are written to Claude Code's built-in plan file (not separate documents in your repo). A full plan carries ten sections — Goal, Spec, Context, Reuse, Risks, Tasks, Parallelism, PR Boundaries, Verification, Not In Scope — and lighter tiers emit a subset: a trivial plan is just Goal, Spec, Tasks, Verification, and Not In Scope, while a moderate one adds Context, Reuse, and Risks.
 
 Tasks are checkboxes, each carrying the files it touches (cited `file:line`), the test to write first, the change to make, how to verify it, and what it must not touch. `/build-it` ticks the boxes as it goes, so the plan doubles as a progress ledger across sessions.
 
