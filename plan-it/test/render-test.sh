@@ -1,0 +1,326 @@
+#!/bin/sh
+# Assertions for plan-it/render-plan.sh that need no browser.
+#
+# Covers Spec 1, 2, 5, 7, 8, 9 from the plan. The visual criteria (3, 4, 6) are
+# not checkable here and are verified by hand against the rendered fixture --
+# see the Verification section of the plan.
+#
+# Usage: sh plan-it/test/render-test.sh
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+RENDER="$DIR/../render-plan.sh"
+FIXTURE="$DIR/fixture-plan.md"
+
+fails=0
+checks=0
+
+ok() {
+	checks=$((checks + 1))
+	printf '  ok    %s\n' "$1"
+}
+
+no() {
+	checks=$((checks + 1))
+	fails=$((fails + 1))
+	printf '  FAIL  %s\n' "$1"
+	[ -n "$2" ] && printf '          %s\n' "$2"
+}
+
+# assert_count <label> <expected> <actual>
+assert_count() {
+	if [ "$2" = "$3" ]; then
+		ok "$1"
+	else
+		no "$1" "expected $2, got $3"
+	fi
+}
+
+# count_str <fixed-string> <file>  -- occurrences, not lines
+count_str() {
+	grep -oF -- "$1" "$2" 2>/dev/null | wc -l | tr -d ' '
+}
+
+# assert_has <label> <fixed-string> <file>
+assert_has() {
+	if grep -qF -- "$2" "$3"; then
+		ok "$1"
+	else
+		no "$1" "missing: $2"
+	fi
+}
+
+printf '\nrender-plan.sh\n'
+
+# --- preconditions -----------------------------------------------------------
+
+if [ ! -f "$RENDER" ]; then
+	no "renderer exists at plan-it/render-plan.sh" "not found -- nothing else can run"
+	printf '\n%s of %s checks passed\n\n' "$((checks - fails))" "$checks"
+	exit 1
+fi
+ok "renderer exists at plan-it/render-plan.sh"
+
+if [ -x "$RENDER" ]; then
+	ok "renderer is executable"
+else
+	no "renderer is executable" "chmod +x plan-it/render-plan.sh"
+fi
+
+if [ -f "$FIXTURE" ]; then
+	ok "fixture exists"
+else
+	no "fixture exists" "$FIXTURE not found"
+	printf '\n%s of %s checks passed\n\n' "$((checks - fails))" "$checks"
+	exit 1
+fi
+
+TMP=$(mktemp -d) || exit 1
+trap 'rm -rf "$TMP"' EXIT INT TERM
+OUT="$TMP/plan.html"
+
+# Point the renderer's scratch space at our own fresh directory. Without this the
+# leak check below cannot tell this run's temp files from a stale one left by an
+# earlier crash or a concurrent run, and the suite goes red for someone else's
+# mess.
+TMPDIR="$TMP"
+export TMPDIR
+
+# --- Spec 1: renders successfully -------------------------------------------
+
+if "$RENDER" "$FIXTURE" "$OUT" >"$TMP/stdout" 2>"$TMP/stderr"; then
+	ok "exits 0 on the fixture"
+else
+	no "exits 0 on the fixture" "exit $?; stderr: $(cat "$TMP/stderr")"
+fi
+
+if [ -s "$OUT" ]; then
+	ok "writes a non-empty file"
+else
+	no "writes a non-empty file" "$OUT is missing or empty"
+	printf '\n%s of %s checks passed\n\n' "$((checks - fails))" "$checks"
+	exit 1
+fi
+
+if grep -qi '<!doctype html' "$OUT"; then
+	ok "output is a full HTML document"
+else
+	no "output is a full HTML document" "no doctype"
+fi
+
+assert_count "exactly one </html>" 1 "$(count_str '</html>' "$OUT")"
+
+# --- Spec 2: no external subresource ----------------------------------------
+# Anchor hrefs are allowed on purpose: the fixture links out, and a link the
+# reader may click is not something the page fetches when it opens. What must
+# be absent is anything loaded automatically.
+
+assert_count 'no src="http' 0 "$(count_str 'src="http' "$OUT")"
+assert_count "no src='http" 0 "$(count_str "src='http" "$OUT")"
+assert_count 'no protocol-relative src' 0 "$(count_str 'src="//' "$OUT")"
+assert_count "no @import" 0 "$(count_str '@import' "$OUT")"
+assert_count "no url(http" 0 "$(count_str 'url(http' "$OUT")"
+assert_count "no <link element" 0 "$(count_str '<link' "$OUT")"
+assert_count "no <iframe" 0 "$(count_str '<iframe' "$OUT")"
+assert_count "no srcset" 0 "$(count_str 'srcset' "$OUT")"
+
+# --- vendored parser is inlined ---------------------------------------------
+# Match the banner without pinning a major version: a deliberate marked upgrade
+# should be caught by MARKED-LICENSE.md's checksum, not by failing this label.
+
+assert_has "marked payload is inlined" 'a markdown parser' "$OUT"
+
+# --- Spec 7 and 8: the plan survives embedding, byte for byte -----------------
+# The plan rides base64-encoded, so no byte of it -- including the closing script
+# tag inside the fixture's fenced block -- can end the block early. That makes the
+# strongest possible assertion available: decode the payload and compare it to the
+# fixture exactly. This subsumes any per-string check for the closing tag, the
+# unbackticked generic, and the non-ASCII punctuation.
+
+decode() {
+	if base64 -d </dev/null >/dev/null 2>&1; then
+		base64 -d
+	else
+		base64 -D
+	fi
+}
+
+sed -n '/id="plan-src"/,/^<\/script>$/p' "$OUT" | sed '1d;$d' >"$TMP/payload.b64"
+
+if [ -s "$TMP/payload.b64" ]; then
+	ok "plan-src block carries a payload"
+else
+	no "plan-src block carries a payload" "block was empty"
+fi
+
+if decode <"$TMP/payload.b64" >"$TMP/decoded.md" 2>"$TMP/decode-err"; then
+	ok "payload decodes"
+else
+	no "payload decodes" "$(head -2 "$TMP/decode-err")"
+fi
+
+if cmp -s "$TMP/decoded.md" "$FIXTURE"; then
+	ok "decoded plan is byte-for-byte identical to the source"
+else
+	no "decoded plan is byte-for-byte identical to the source" \
+		"$(cmp "$TMP/decoded.md" "$FIXTURE" 2>&1 | head -2)"
+fi
+
+# Named checks on the decoded text as well: cmp proves everything, but a failure
+# here says which construct broke instead of just reporting a byte offset.
+assert_has "closing script tag survives the round trip" '</script>' "$TMP/decoded.md"
+assert_has "unbackticked generic survives" 'Map<string, Foo>' "$TMP/decoded.md"
+assert_has "em-dash survives" '—' "$TMP/decoded.md"
+assert_has "arrow survives" '→' "$TMP/decoded.md"
+assert_has "file:line reference survives" 'path/to/file.ts:42' "$TMP/decoded.md"
+assert_count "fixture carries 4 checked tasks" 4 "$(count_str '- [x]' "$TMP/decoded.md")"
+assert_count "fixture carries 2 unchecked tasks" 2 "$(count_str '- [ ]' "$TMP/decoded.md")"
+
+# --- plan-aware layer is bundled ---------------------------------------------
+# These are string checks, not behavior: they only prove the layer was
+# concatenated in, so a template edit that drops it fails loudly. Labelled as
+# "bundled" rather than "works" on purpose -- an earlier version of this file
+# claimed things like "progress meter is present", which read as behavioral and
+# stayed green through a bug that made the meter never render at all.
+
+assert_has "task-card transform is bundled" 'buildTaskCards' "$OUT"
+assert_has "location-chip transform is bundled" 'chipLocations' "$OUT"
+assert_has "progress meter markup is bundled" 'progressbar' "$OUT"
+assert_has "section-index scrollspy is bundled" 'IntersectionObserver' "$OUT"
+assert_has "raw-HTML escaping is bundled" 'renderer:' "$OUT"
+assert_has "page decodes the embedded payload" 'atob(' "$OUT"
+assert_has "page decodes as UTF-8, not latin1" 'TextDecoder' "$OUT"
+
+# --- the shape the task-card transform depends on ----------------------------
+# This is the guard that was missing. The transform reads marked's output, and
+# marked emits a *different* DOM shape for a loose list (blank lines between
+# items, which the plan format uses) than for a tight one: the checkbox ends up
+# inside a <p> rather than directly in the <li>. Handling only the tight shape
+# made the entire transform inert on every real plan while the suite stayed
+# green. Assert the real shape here, so a marked upgrade or a fixture edit that
+# changes it fails instead of silently disabling the feature.
+
+if command -v node >/dev/null 2>&1; then
+	SHAPE=$(node -e '
+		var m = require(process.argv[1]);
+		var fs = require("fs");
+		var html = m.parse(fs.readFileSync(process.argv[2], "utf8"));
+		var loose = (html.match(/<li><p><input[^>]*type="checkbox"/g) || []).length;
+		var tight = (html.match(/<li><input[^>]*type="checkbox"/g) || []).length;
+		var checked = (html.match(/<input checked[^>]*type="checkbox"/g) || []).length;
+		var all = (html.match(/type="checkbox"/g) || []).length;
+		console.log(loose + " " + tight + " " + checked + " " + all);
+	' "$DIR/../assets/marked.umd.js" "$FIXTURE" 2>"$TMP/shape-err")
+
+	if [ -n "$SHAPE" ]; then
+		set -- $SHAPE
+		assert_count "marked emits 6 checkboxes for the fixture" 6 "$4"
+		assert_count "marked marks 4 of them checked" 4 "$3"
+
+		if [ "$1" -gt 0 ] || [ "$2" -gt 0 ]; then
+			ok "fixture produces a checkbox shape the transform handles ($1 loose, $2 tight)"
+		else
+			no "fixture produces a checkbox shape the transform handles" "neither shape found"
+		fi
+
+		# The transform must cope with whichever shape is present. Loose is what
+		# the plan format yields, so require the <p> fallback when it appears.
+		if [ "$1" -gt 0 ]; then
+			if grep -qF ":scope > p" "$DIR/../assets/template-head.html"; then
+				ok "transform handles the loose (<p>-wrapped) shape marked actually emits"
+			else
+				no "transform handles the loose (<p>-wrapped) shape marked actually emits" \
+					"marked emitted $1 loose items but the layer has no ':scope > p' fallback"
+			fi
+		fi
+	else
+		no "marked renders the fixture" "$(head -3 "$TMP/shape-err")"
+	fi
+else
+	printf '  skip  marked output-shape checks (node not found)\n'
+fi
+
+# A syntax error in the layer would blank the page silently. Guard it when node
+# is available; skip cleanly when it is not, so the suite needs no dependencies.
+if command -v node >/dev/null 2>&1; then
+	sed -n '/^<script>$/,/^<\/script>$/p' "$DIR/../assets/template-head.html" |
+		sed '1d;$d' >"$TMP/layer.js"
+	if node --check "$TMP/layer.js" 2>"$TMP/syntax-err"; then
+		ok "plan-aware layer parses as valid JavaScript"
+	else
+		no "plan-aware layer parses as valid JavaScript" "$(head -3 "$TMP/syntax-err")"
+	fi
+else
+	printf '  skip  plan-aware layer syntax check (node not found)\n'
+fi
+
+# --- behavioral checks in a real DOM (optional) -------------------------------
+# Everything above is text inspection, which cannot tell whether the transforms
+# actually do anything -- see the header of dom-test.mjs. When a jsdom install is
+# reachable, run the real thing. jsdom is not a dependency of this repo, so this
+# skips cleanly without one.
+
+DOM_TEST="$DIR/dom-test.mjs"
+if command -v node >/dev/null 2>&1 && [ -f "$DOM_TEST" ] &&
+	node -e 'import(process.env.JSDOM_PATH || "jsdom").then(()=>process.exit(0),()=>process.exit(1))' 2>/dev/null; then
+	printf '\n  -- DOM checks --\n'
+	if node "$DOM_TEST" "$OUT" "$FIXTURE"; then
+		ok "behavioral DOM checks pass"
+	else
+		no "behavioral DOM checks pass" "see the DOM check output above"
+	fi
+	printf '\n'
+else
+	printf '  skip  behavioral DOM checks (jsdom not reachable; set JSDOM_PATH to enable)\n'
+fi
+
+# --- Spec 9: failure modes ---------------------------------------------------
+
+# assert_exit <label> <expected-code> <command...>
+assert_exit() {
+	label=$1
+	want=$2
+	shift 2
+	"$@" >/dev/null 2>"$TMP/stderr-case"
+	got=$?
+	if [ "$got" -ne "$want" ]; then
+		no "$label" "expected exit $want, got $got"
+	elif [ ! -s "$TMP/stderr-case" ]; then
+		no "$label" "exit $want but nothing on stderr"
+	else
+		ok "$label"
+	fi
+}
+
+MISSING_OUT="$TMP/should-not-exist.html"
+
+assert_exit "unreadable input exits 2" 2 "$RENDER" "$TMP/no-such-plan.md" "$MISSING_OUT"
+assert_exit "missing output argument exits 2" 2 "$RENDER" "$FIXTURE"
+assert_exit "too many arguments exits 2" 2 "$RENDER" "$FIXTURE" "$MISSING_OUT" extra
+assert_exit "output path that is a directory exits 2" 2 "$RENDER" "$FIXTURE" "$TMP"
+assert_exit "missing output directory exits 2" 2 "$RENDER" "$FIXTURE" "$TMP/nope/plan.html"
+
+if [ -e "$MISSING_OUT" ]; then
+	no "failed render leaves no partial output" "$MISSING_OUT was created"
+else
+	ok "failed render leaves no partial output"
+fi
+
+# The missing-asset path (exit 3) had no coverage at all. Exercise it against a
+# copy of the script whose assets directory is deliberately incomplete.
+ASSETDIR="$TMP/fake/assets"
+mkdir -p "$ASSETDIR"
+cp "$RENDER" "$TMP/fake/render-plan.sh"
+for a in template-head.html template-mid.html template-tail.html; do
+	: >"$ASSETDIR/$a"
+done
+assert_exit "missing asset exits 3" 3 "$TMP/fake/render-plan.sh" "$FIXTURE" "$TMP/fake/out.html"
+
+# No temp files may survive any of the failure paths above. TMPDIR is this run's
+# own directory, so anything found here was leaked by this run.
+leaked=$(find "$TMP" -maxdepth 1 -name 'render-plan.*' 2>/dev/null | wc -l | tr -d ' ')
+assert_count "no temp files leaked" 0 "$leaked"
+
+# --- summary ----------------------------------------------------------------
+
+printf '\n%s of %s checks passed\n\n' "$((checks - fails))" "$checks"
+[ "$fails" -eq 0 ] || exit 1

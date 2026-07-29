@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementation Plan</title>
+<style>
+/* No web fonts, no remote stylesheet imports, no remote background images --
+   the page must open with no network access at all. */
+
+:root {
+  --bg: #fbfbf9;
+  --panel: #ffffff;
+  --ink: #1b1c1a;
+  --muted: #6a6b66;
+  --rule: #e3e3de;
+  --accent: #2b5fa8;
+  --done: #3f7d58;
+  --chip-bg: #f0f0ea;
+  --chip-ink: #44453f;
+  --measure: 68ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15161a;
+    --panel: #1c1e23;
+    --ink: #e7e7e3;
+    --muted: #9a9b95;
+    --rule: #2c2f36;
+    --accent: #83aded;
+    --done: #6fbf8f;
+    --chip-bg: #24272d;
+    --chip-ink: #c4c6c0;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "kern";
+}
+
+code, pre, .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.skip { position: absolute; left: -9999px; }
+.skip:focus {
+  left: 1rem; top: 1rem; z-index: 10;
+  background: var(--panel); color: var(--ink);
+  padding: .5rem .85rem; border: 1px solid var(--rule); border-radius: 6px;
+}
+
+/* --- layout ------------------------------------------------------------- */
+
+.layout { padding: 1.5rem 1.25rem 6rem; }
+
+@media (min-width: 900px) {
+  .layout {
+    display: grid;
+    grid-template-columns: 16rem minmax(0, 1fr);
+    gap: 3.5rem;
+    max-width: calc(16rem + 3.5rem + var(--measure) + 6rem);
+    margin: 0 auto;
+    padding: 2.5rem 2rem 6rem;
+    align-items: start;
+  }
+}
+
+#plan { max-width: var(--measure); }
+
+/* --- section index ------------------------------------------------------ */
+
+#toc {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (min-width: 900px) {
+  #toc {
+    position: sticky;
+    top: 2.5rem;
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 0;
+  }
+}
+
+.nav-head { margin-bottom: 1.25rem; }
+
+.count {
+  margin: 0 0 .5rem;
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meter {
+  height: 5px;
+  background: var(--rule);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.meter-fill { display: block; height: 100%; background: var(--done); }
+
+.toggle {
+  margin-top: .9rem;
+  font: inherit;
+  font-size: .82rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: .35rem .6rem;
+  cursor: pointer;
+}
+.toggle:hover { color: var(--ink); border-color: var(--muted); }
+
+#toc ul { list-style: none; margin: 0; padding: 0; }
+
+#toc a {
+  display: block;
+  padding: .28rem 0 .28rem .7rem;
+  border-left: 2px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .875rem;
+  line-height: 1.35;
+}
+#toc a:hover { color: var(--ink); }
+#toc a.active { color: var(--accent); border-left-color: var(--accent); }
+#toc .lvl-h1 > a { font-weight: 650; color: var(--ink); }
+
+/* --- prose -------------------------------------------------------------- */
+
+#plan h1 {
+  font-size: 1.7rem;
+  line-height: 1.25;
+  letter-spacing: -.015em;
+  margin: 0 0 1.5rem;
+}
+
+#plan h2 {
+  font-size: 1.12rem;
+  letter-spacing: .01em;
+  margin: 2.75rem 0 .9rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--rule);
+}
+
+#plan h3 { font-size: .98rem; margin: 1.9rem 0 .6rem; }
+
+#plan p, #plan li { overflow-wrap: break-word; }
+#plan ul, #plan ol { padding-left: 1.35rem; }
+#plan li { margin: .35rem 0; }
+
+#plan ol > li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+#plan a { color: var(--accent); text-underline-offset: 2px; }
+
+#plan > ul > li > strong:first-child { color: var(--ink); }
+
+#plan code {
+  font-size: .875em;
+  background: var(--chip-bg);
+  color: var(--chip-ink);
+  padding: .1em .35em;
+  border-radius: 4px;
+}
+
+#plan pre {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: .9rem 1rem;
+  overflow-x: auto;
+  font-size: .84rem;
+  line-height: 1.55;
+}
+#plan pre code { background: none; padding: 0; font-size: inherit; }
+
+.loc {
+  font-size: .84em !important;
+  white-space: nowrap;
+}
+
+/* --- tables ------------------------------------------------------------- */
+
+.table-scroll { overflow-x: auto; margin: 1.1rem 0; }
+
+#plan table { border-collapse: collapse; font-size: .9rem; min-width: 100%; }
+#plan th, #plan td {
+  text-align: left;
+  padding: .5rem .8rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+#plan th {
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* --- task cards --------------------------------------------------------- */
+
+.tasks { display: flex; flex-direction: column; gap: .5rem; margin: 1.25rem 0; }
+
+.task {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.task > summary {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  padding: .7rem .9rem;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 8px;
+}
+.task > summary::-webkit-details-marker { display: none; }
+
+/* Disclosure caret, drawn rather than loaded. */
+.task > summary::before {
+  content: "";
+  flex: none;
+  width: .42rem;
+  height: .42rem;
+  margin-top: .38rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform .12s ease;
+}
+.task[open] > summary::before { transform: rotate(45deg); }
+
+.task > summary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+.task-name { font-weight: 550; }
+
+.task.done { border-left: 3px solid var(--done); }
+.task.done .task-name { color: var(--muted); }
+
+/* The badge hangs off the summary for a disclosure and off the row itself for a
+   task with no sub-bullets, which has no summary to hang it on. */
+.task.done > summary::after,
+div.task.done::after {
+  content: "done";
+  margin-left: auto;
+  flex: none;
+  font-size: .68rem;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--done);
+}
+
+/* A task with no sub-bullets is a plain row, not a disclosure. */
+div.task {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  padding: .7rem .9rem .7rem 1.9rem;
+}
+
+/* A task inside a list that also holds ordinary bullets stays in place, so the
+   reader's ordering is preserved; the list marker would just be noise. */
+li.task-item { list-style: none; margin-left: -1.35rem; }
+
+.task-body {
+  padding: .2rem .9rem .8rem 1.95rem;
+  font-size: .93rem;
+  color: var(--ink);
+}
+.task-body ul { padding-left: 1.1rem; margin: 0; }
+.task-body li { margin: .3rem 0; color: var(--muted); }
+.task-body li > code { color: var(--chip-ink); }
+
+/* --- fallback when the parser is unavailable ---------------------------- */
+
+.raw { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: .85rem; }
+
+/* --- print -------------------------------------------------------------- */
+
+@media print {
+  :root {
+    --bg: #fff; --panel: #fff; --ink: #000; --muted: #333;
+    --rule: #bbb; --accent: #000; --done: #333;
+    --chip-bg: #f2f2f2; --chip-ink: #000;
+  }
+  .skip, #toc { display: none; }
+  .layout { display: block; max-width: none; padding: 0; }
+  #plan { max-width: none; }
+  body { font-size: 11pt; }
+  #plan h2 { break-after: avoid; }
+  .task { break-inside: avoid; border: 1px solid var(--rule); }
+  .task > summary::before, .task > summary { cursor: auto; }
+  #plan pre, .table-scroll { overflow: visible; }
+  #plan a { color: #000; }
+}
+</style>
+<script>
+/* The plan-aware layer.
+ *
+ * Runs on DOMContentLoaded, which fires after every synchronous script in the
+ * document -- including the vendored marked payload further down -- so the
+ * global `marked` is guaranteed to exist by then.
+ *
+ * Everything here is presentation. The markdown in #plan-src is the source of
+ * truth; this file is generated by render-plan.sh and must never be hand-edited.
+ */
+document.addEventListener('DOMContentLoaded', function () {
+  var host = document.getElementById('plan');
+  var toc = document.getElementById('toc');
+  var srcEl = document.getElementById('plan-src');
+  if (!host || !srcEl || !toc) return;
+
+  /* --- source ------------------------------------------------------------ */
+
+  /* render-plan.sh embeds the plan base64-encoded, so no byte of it can end the
+     block early and the decode is exact -- see the comment there for why a
+     textual escape is not a round trip.
+   *
+   * atob alone is not enough: it yields latin1, and plans are full of em-dashes
+   * and arrows. TextDecoder is the right tool and every real browser has had it
+   * for years, but it is not universal in every embedded or headless DOM, and one
+   * missing global should not blank the whole page -- so fall back to
+   * percent-decoding, which reassembles multi-byte UTF-8 correctly too. */
+  function utf8(bytes) {
+    if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes);
+    var pct = '';
+    for (var i = 0; i < bytes.length; i++) pct += '%' + ('0' + bytes[i].toString(16)).slice(-2);
+    try {
+      return decodeURIComponent(pct);
+    } catch (e) {
+      /* Malformed UTF-8. TextDecoder would substitute U+FFFD and carry on, so the
+         fallback must not be the stricter of the two -- blanking the page over a
+         stray byte is worse than showing it as latin1. */
+      var s = '';
+      for (var j = 0; j < bytes.length; j++) s += String.fromCharCode(bytes[j]);
+      return s;
+    }
+  }
+
+  var src;
+  try {
+    var b64 = srcEl.textContent.replace(/\s+/g, '');
+    src = utf8(Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); }));
+  } catch (e) {
+    host.textContent = 'Could not decode the embedded plan: ' + e.message +
+      '\nRead .claude/plan.md instead.';
+    host.className = 'raw';
+    return;
+  }
+
+  if (typeof marked === 'undefined') {
+    host.textContent = src;
+    host.className = 'raw';
+    return;
+  }
+
+  /* Raw HTML in a plan is prose *about* markup, not markup to run. Rendering it
+     as literal text keeps the page faithful and stops a plan that mentions a
+     bare tag from restyling the document or loading a remote resource. */
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  var md = new marked.Marked();
+  md.use({ renderer: { html: function (token) { return escapeHtml(token.text); } } });
+  host.innerHTML = md.parse(src);
+
+  /* --- task cards -------------------------------------------------------- */
+
+  /* The name is what a human scans; the nested list is for the coding agent.
+     Collapsing the nested list by default is the whole point of this view.
+   *
+   * marked emits two different shapes and BOTH have to be handled. A tight list
+   * puts the checkbox directly in the item:
+   *     <li><input type="checkbox"> Name<ul>...</ul></li>
+   * A loose list -- which is what the plan format actually produces, because it
+   * leaves a blank line between tasks -- wraps the content in a paragraph:
+   *     <li><p><input type="checkbox">\nName</p><ul>...</ul></li>
+   * Matching only the tight shape makes this whole transform silently inert on
+   * every real plan, so `parts` resolves the checkbox and the node holding the
+   * name for either one. */
+  function parts(li) {
+    var box = li.querySelector(':scope > input[type=checkbox]');
+    var nameHost = li;
+    if (!box) {
+      var p = li.querySelector(':scope > p');
+      var inP = p && p.querySelector(':scope > input[type=checkbox]');
+      if (inP) { box = inP; nameHost = p; }
+    }
+    if (!box) return null;
+    return { box: box, nameHost: nameHost };
+  }
+
+  /* Where the name stops and the collapsible body begins, for the tight shape. */
+  var BLOCK = /^(?:UL|OL|PRE|P|TABLE|BLOCKQUOTE|DIV|HR|H[1-6])$/;
+
+  function buildCard(li) {
+    var p = parts(li);
+    if (!p) return null;
+    var done = p.box.checked;
+
+    /* Split the item into the name and everything else. "Everything else" must be
+       *all* of it, not just the first sub-list: a task may carry an extra
+       paragraph, a fenced code block, a table, or a second list, and dropping any
+       of that would silently delete content the plan author wrote. */
+    var nameNodes = [];
+    var bodyNodes = [];
+
+    if (p.nameHost !== li) {
+      /* Loose: the leading paragraph is the name, every other child is body. */
+      [].slice.call(p.nameHost.childNodes).forEach(function (n) {
+        if (n !== p.box) nameNodes.push(n);
+      });
+      [].slice.call(li.childNodes).forEach(function (n) {
+        if (n !== p.nameHost) bodyNodes.push(n);
+      });
+    } else {
+      /* Tight: the name runs until the first block-level child. */
+      var inName = true;
+      [].slice.call(li.childNodes).forEach(function (n) {
+        if (n === p.box) return;
+        if (inName && n.nodeType === 1 && BLOCK.test(n.tagName)) inName = false;
+        (inName ? nameNodes : bodyNodes).push(n);
+      });
+    }
+
+    var name = document.createElement('span');
+    name.className = 'task-name';
+    nameNodes.forEach(function (n) { name.appendChild(n); });
+
+    /* marked leaves a space after the input and, in loose lists, a trailing
+       newline. Trim both so the name sits flush in its card. */
+    if (name.firstChild && name.firstChild.nodeType === 3) {
+      name.firstChild.nodeValue = name.firstChild.nodeValue.replace(/^\s+/, '');
+    }
+    if (name.lastChild && name.lastChild.nodeType === 3) {
+      name.lastChild.nodeValue = name.lastChild.nodeValue.replace(/\s+$/, '');
+    }
+
+    var hasBody = bodyNodes.some(function (n) {
+      return n.nodeType === 1 || (n.nodeType === 3 && n.nodeValue.trim() !== '');
+    });
+
+    var card;
+    if (hasBody) {
+      card = document.createElement('details');
+      var summary = document.createElement('summary');
+      summary.appendChild(name);
+      card.appendChild(summary);
+      var wrap = document.createElement('div');
+      wrap.className = 'task-body';
+      bodyNodes.forEach(function (n) { wrap.appendChild(n); });
+      card.appendChild(wrap);
+    } else {
+      card = document.createElement('div');
+      card.appendChild(name);
+    }
+    card.className = 'task' + (done ? ' done' : '');
+    card.setAttribute('data-state', done ? 'done' : 'todo');
+    return card;
+  }
+
+  function buildTaskCards() {
+    /* `ol` as well as `ul`: a numbered task list is still a task list, and
+       leaving it out reproduces exactly the too-narrow-selector bug that made
+       this transform inert on loose lists. */
+    [].slice.call(host.querySelectorAll('ul, ol')).forEach(function (list) {
+      var children = [].slice.call(list.children);
+      var items = children.filter(function (li) { return parts(li); });
+      if (!items.length) return;
+
+      if (items.length === children.length) {
+        /* A pure task list -- the ## Tasks section -- becomes a stack of cards. */
+        var group = document.createElement('div');
+        group.className = 'tasks';
+        items.forEach(function (li) {
+          var card = buildCard(li);
+          if (card) group.appendChild(card);
+        });
+        list.replaceWith(group);
+      } else {
+        /* Mixed list: rewrite each task in place rather than hoisting the cards
+           above the list, which would reorder the reader's content. */
+        items.forEach(function (li) {
+          var card = buildCard(li);
+          if (!card) return;
+          li.replaceChildren(card);
+          li.className = 'task-item';
+        });
+      }
+    });
+  }
+  buildTaskCards();
+
+  /* --- location chips ---------------------------------------------------- */
+
+  /* Wrap file:line references so they read as addresses rather than prose.
+   *
+   * The walker must not descend into code, pre, or links: injecting markup inside
+   * a code sample would corrupt the very thing the reader is checking. `summary`
+   * is skipped too, deliberately -- a task name is the one line that should stay
+   * plain, and chipping inside it fights the scannability this view is for. */
+  /* Deliberately narrow. `.dev`, `.app` and `.test` are left out because
+     `Dockerfile.dev:3` and `server.test:12` are more plausible in a plan than the
+     same names as hosts with explicit ports. The residual trade is cosmetic in
+     both directions: a file literally named `foo.local` will not get a chip, and
+     a host like `redis.cache:6379` still will. */
+  var HOSTISH = /\.(?:com|net|org|io|local|internal|localhost)$/i;
+
+  /* `db.internal:5432` and `api.example.com:443` match the same shape as a file
+     reference. Reject host:port unless the match is clearly a path. */
+  function isLocation(s) {
+    var head = s.slice(0, s.lastIndexOf(':'));
+    return head.indexOf('/') !== -1 || !HOSTISH.test(head);
+  }
+
+  function chipLocations() {
+    var re = /(?:[\w.\-]+\/)*[\w.\-]*\.[A-Za-z][\w]*:\d+(?:[-–]\d+)?/g;
+    var walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        if (!node.nodeValue || node.nodeValue.indexOf(':') === -1) return NodeFilter.FILTER_REJECT;
+        /* `.task-name` as well as `summary`: a task with no sub-bullets has no
+           summary to be caught by, and its name should stay as plain as any
+           other task's. */
+        if (node.parentElement.closest('code, pre, a, summary, .task-name')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var targets = [];
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) targets.push(n);
+
+    targets.forEach(function (node) {
+      var text = node.nodeValue;
+      re.lastIndex = 0;
+      if (!re.test(text)) return;
+      re.lastIndex = 0;
+      var frag = document.createDocumentFragment();
+      var last = 0, match;
+      while ((match = re.exec(text)) !== null) {
+        if (!isLocation(match[0])) continue;
+        if (match.index > last) frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+        var chip = document.createElement('code');
+        chip.className = 'loc';
+        chip.textContent = match[0];
+        frag.appendChild(chip);
+        last = match.index + match[0].length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+  chipLocations();
+
+  /* --- wide tables ------------------------------------------------------- */
+
+  [].slice.call(host.querySelectorAll('table')).forEach(function (table) {
+    var scroller = document.createElement('div');
+    scroller.className = 'table-scroll';
+    table.parentNode.insertBefore(scroller, table);
+    scroller.appendChild(table);
+  });
+
+  /* --- section index ----------------------------------------------------- */
+
+  function slug(text, used) {
+    var base = text.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
+    var s = base, i = 2;
+    while (used[s]) s = base + '-' + i++;
+    used[s] = true;
+    return s;
+  }
+
+  var headings = [].slice.call(host.querySelectorAll('h1, h2'));
+  var used = {};
+  var links = [];
+
+  var head = document.createElement('div');
+  head.className = 'nav-head';
+
+  /* Count the cards, not the checkboxes: buildTaskCards drops the <input>
+     elements when it rewrites each item, so counting inputs here would always
+     come back zero and the meter would never appear.
+   *
+     Only top-level cards count. A checkbox nested inside a task's sub-bullets is
+     a detail of that task, not a task of its own, and counting it would report a
+     total the reader cannot reconcile with the plan. */
+  var topCards = [].slice.call(host.querySelectorAll('.task')).filter(function (c) {
+    return !c.parentNode.closest('.task-body');
+  });
+  var total = topCards.length;
+  var done = topCards.filter(function (c) { return c.classList.contains('done'); }).length;
+
+  if (total) {
+    var meter = document.createElement('div');
+    meter.className = 'meter';
+    meter.setAttribute('role', 'progressbar');
+    meter.setAttribute('aria-valuemin', '0');
+    meter.setAttribute('aria-valuemax', String(total));
+    meter.setAttribute('aria-valuenow', String(done));
+    meter.setAttribute('aria-label', 'Tasks complete');
+    var fill = document.createElement('span');
+    fill.className = 'meter-fill';
+    fill.style.width = (total ? (done / total) * 100 : 0) + '%';
+    meter.appendChild(fill);
+
+    var count = document.createElement('p');
+    count.className = 'count';
+    count.textContent = done + ' / ' + total + ' tasks';
+
+    head.appendChild(count);
+    head.appendChild(meter);
+  }
+
+  var cards = host.querySelectorAll('details.task');
+  if (cards.length) {
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'toggle';
+    var open = false;
+    toggle.textContent = 'Expand all detail';
+    toggle.addEventListener('click', function () {
+      open = !open;
+      [].slice.call(host.querySelectorAll('details.task')).forEach(function (d) { d.open = open; });
+      toggle.textContent = open ? 'Collapse all detail' : 'Expand all detail';
+    });
+    head.appendChild(toggle);
+  }
+
+  if (head.childNodes.length) toc.appendChild(head);
+
+  if (headings.length) {
+    var list = document.createElement('ul');
+    headings.forEach(function (h) {
+      h.id = h.id || slug(h.textContent, used);
+      var li = document.createElement('li');
+      li.className = 'lvl-' + h.tagName.toLowerCase();
+      var a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent;
+      li.appendChild(a);
+      list.appendChild(li);
+      links.push({ id: h.id, a: a });
+    });
+    toc.appendChild(list);
+  }
+
+  /* Highlight the section being read. */
+  if (links.length && 'IntersectionObserver' in window) {
+    var visible = {};
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting; });
+      var current = null;
+      for (var i = 0; i < links.length; i++) {
+        if (visible[links[i].id]) { current = links[i].id; break; }
+      }
+      links.forEach(function (l) {
+        l.a.classList.toggle('active', l.id === current);
+      });
+    }, { rootMargin: '0px 0px -70% 0px' });
+    headings.forEach(function (h) { observer.observe(h); });
+  }
+
+  /* --- printing ---------------------------------------------------------- */
+
+  /* Collapsed sub-bullets must appear on paper: a printout is read away from the
+     disclosure controls. CSS alone cannot reliably reveal a closed <details>, so
+     open them for the print and restore whatever the reader had open after. */
+  var restore = [];
+  window.addEventListener('beforeprint', function () {
+    restore = [].slice.call(host.querySelectorAll('details.task')).filter(function (d) {
+      return !d.open;
+    });
+    restore.forEach(function (d) { d.open = true; });
+  });
+  window.addEventListener('afterprint', function () {
+    restore.forEach(function (d) { d.open = false; });
+    restore = [];
+  });
+
+  /* Title the tab after the plan's goal so a pinned tab is identifiable. The h1
+     itself is no good: the plan format makes it the literal word "Goal", so every
+     plan would get the same title. The goal sentence is the paragraph under it. */
+  var h1 = host.querySelector('h1');
+  if (h1) {
+    var lead = h1.nextElementSibling;
+    var text = (lead && lead.tagName === 'P' ? lead.textContent : h1.textContent).trim();
+    if (text.length > 70) text = text.slice(0, 69).replace(/\s+\S*$/, '') + '…';
+    document.title = text + ' — Plan';
+  }
+});
+</script>
+</head>
+<body>
+<a class="skip" href="#plan">Skip to plan</a>
+<div class="layout">
+<nav id="toc" aria-label="Plan sections"></nav>
+<main id="plan"></main>
+</div>
+<script id="plan-src" type="text/plain" data-encoding="base64">
