@@ -1,10 +1,14 @@
 #!/bin/sh
 # Render a plan markdown file to a single self-contained HTML page.
 #
-#   render-plan.sh <plan.md> <out.html>
+#   render-plan.sh [--open] <plan.md> <out.html>
+#
+# --open  Open the rendered page in the default browser. Skipped in a remote
+#         session, or when no platform opener exists. Never fails the render:
+#         the page is written either way.
 #
 # Exit codes:
-#   0  rendered
+#   0  rendered (whether or not it opened)
 #   2  bad usage, unreadable input, or missing output directory
 #   3  a template asset is missing
 #
@@ -16,14 +20,22 @@
 set -e
 
 usage() {
-	printf 'usage: %s <plan.md> <out.html>\n' "$(basename "$0")" >&2
+	printf 'usage: %s [--open] <plan.md> <out.html>\n' "$(basename "$0")" >&2
 	exit 2
 }
+
+do_open=no
+if [ "$1" = "--open" ]; then
+	do_open=yes
+	shift
+fi
 
 [ $# -eq 2 ] || usage
 
 src=$1
 out=$2
+
+case $src in --*) usage ;; esac
 
 # Logical cd, not physical: this script is reached through the
 # ~/.claude/skills/plan-it symlink, and the assets sit beside it in both views.
@@ -80,3 +92,34 @@ mv -- "$tmp" "$out"
 trap - EXIT INT TERM
 
 printf '%s\n' "$out"
+
+# A file:// URL is not reliably clickable in a terminal -- Ghostty, for one, only
+# linkifies web URLs, and no OSC 8 hyperlink survives the round trip through the
+# agent harness. So open the page rather than print an address and hope.
+if [ "$do_open" = yes ]; then
+	if [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]; then
+		printf '%s: remote session, not opening; read %s on the host\n' \
+			"$(basename "$0")" "$out" >&2
+	else
+		# PLAN_OPENER exists so the test suite can observe this without launching
+		# a browser.
+		opener=${PLAN_OPENER:-}
+		if [ -z "$opener" ]; then
+			for candidate in open xdg-open; do
+				if command -v "$candidate" >/dev/null 2>&1; then
+					opener=$candidate
+					break
+				fi
+			done
+		fi
+
+		if [ -z "$opener" ]; then
+			printf '%s: no opener found (tried open, xdg-open); the page is at %s\n' \
+				"$(basename "$0")" "$out" >&2
+		elif ! "$opener" "$out" >/dev/null 2>&1; then
+			# The render succeeded, so this is a note, not a failure.
+			printf '%s: could not open the page; it is at %s\n' \
+				"$(basename "$0")" "$out" >&2
+		fi
+	fi
+fi

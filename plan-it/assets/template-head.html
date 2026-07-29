@@ -21,8 +21,11 @@
   --measure: 68ch;
 }
 
+/* Follow the OS unless the reader has explicitly chosen light. Long-form reading
+   and terminal work don't always want the same thing, so the choice is theirs;
+   `data-theme` is set from localStorage before first paint of the body content. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #15161a;
     --panel: #1c1e23;
     --ink: #e7e7e3;
@@ -33,6 +36,18 @@
     --chip-bg: #24272d;
     --chip-ink: #c4c6c0;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15161a;
+  --panel: #1c1e23;
+  --ink: #e7e7e3;
+  --muted: #9a9b95;
+  --rule: #2c2f36;
+  --accent: #83aded;
+  --done: #6fbf8f;
+  --chip-bg: #24272d;
+  --chip-ink: #c4c6c0;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -113,18 +128,26 @@ code, pre, .loc { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, mo
 }
 .meter-fill { display: block; height: 100%; background: var(--done); }
 
-.toggle {
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
   margin-top: .9rem;
+}
+
+.toggle {
   font: inherit;
-  font-size: .82rem;
+  font-size: .8rem;
   color: var(--muted);
   background: transparent;
   border: 1px solid var(--rule);
   border-radius: 6px;
   padding: .35rem .6rem;
   cursor: pointer;
+  text-align: left;
 }
 .toggle:hover { color: var(--ink); border-color: var(--muted); }
+.toggle.theme { font-variant-numeric: tabular-nums; text-transform: capitalize; }
 
 #toc ul { list-style: none; margin: 0; padding: 0; }
 
@@ -286,9 +309,18 @@ li.task-item { list-style: none; margin-left: -1.35rem; }
   font-size: .93rem;
   color: var(--ink);
 }
-.task-body ul { padding-left: 1.1rem; margin: 0; }
-.task-body li { margin: .3rem 0; color: var(--muted); }
+.task-body ul { padding-left: 0; margin: 0; list-style: none; }
+.task-body li { margin: .45rem 0; color: var(--muted); }
 .task-body li > code { color: var(--chip-ink); }
+
+/* The sub-bullets are Label: value pairs. Giving the label weight turns a task
+   body from a paragraph you read into a table you scan. */
+.task-body .k {
+  font-weight: 620;
+  color: var(--ink);
+  font-size: .82rem;
+  letter-spacing: .01em;
+}
 
 /* --- fallback when the parser is unavailable ---------------------------- */
 
@@ -510,6 +542,26 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   buildTaskCards();
 
+  /* Give the sub-bullet labels -- Files:, Test first:, Verify: -- typographic
+     weight, so a task body scans as a set of fields rather than a paragraph. */
+  function labelTaskDetails() {
+    var LABEL = /^([A-Z][A-Za-z][A-Za-z ]{0,18}):\s/;
+    [].slice.call(host.querySelectorAll('.task-body li')).forEach(function (li) {
+      var first = li.firstChild;
+      if (!first || first.nodeType !== 3) return;
+      var m = LABEL.exec(first.nodeValue);
+      if (!m) return;
+      var k = document.createElement('span');
+      k.className = 'k';
+      /* Keep the colon in the text rather than adding it via CSS ::after, so that
+         copying a task body out of the page yields "Files: x.ts:1" as written. */
+      k.textContent = m[1] + ':';
+      first.nodeValue = ' ' + first.nodeValue.slice(m[0].length);
+      li.insertBefore(k, first);
+    });
+  }
+  labelTaskDetails();
+
   /* --- location chips ---------------------------------------------------- */
 
   /* Wrap file:line references so they read as addresses rather than prose.
@@ -608,26 +660,43 @@ document.addEventListener('DOMContentLoaded', function () {
   var total = topCards.length;
   var done = topCards.filter(function (c) { return c.classList.contains('done'); }).length;
 
+  /* A bar is only worth drawing when it says something. At review time -- the
+     main reason this page exists -- nothing is done yet, so a 0% bar is noise;
+     and since the page is not re-rendered as work lands, a full bar mostly means
+     "this plan was rendered after the fact" rather than "you are finished". So
+     state the count plainly, and show the bar only while genuinely part-done. */
   if (total) {
-    var meter = document.createElement('div');
-    meter.className = 'meter';
-    meter.setAttribute('role', 'progressbar');
-    meter.setAttribute('aria-valuemin', '0');
-    meter.setAttribute('aria-valuemax', String(total));
-    meter.setAttribute('aria-valuenow', String(done));
-    meter.setAttribute('aria-label', 'Tasks complete');
-    var fill = document.createElement('span');
-    fill.className = 'meter-fill';
-    fill.style.width = (total ? (done / total) * 100 : 0) + '%';
-    meter.appendChild(fill);
-
     var count = document.createElement('p');
     count.className = 'count';
-    count.textContent = done + ' / ' + total + ' tasks';
-
+    if (done === 0) {
+      count.textContent = total + (total === 1 ? ' task' : ' tasks');
+    } else if (done < total) {
+      count.textContent = done + ' of ' + total + ' done';
+    } else {
+      count.textContent = total + (total === 1 ? ' task' : ' tasks') + ' · all done';
+    }
     head.appendChild(count);
-    head.appendChild(meter);
+
+    /* Only while part-done. At 0% it is noise and at 100% the text already says
+       it, so a bar on screen always means "this much of the way through". */
+    if (done > 0 && done < total) {
+      var meter = document.createElement('div');
+      meter.className = 'meter';
+      meter.setAttribute('role', 'progressbar');
+      meter.setAttribute('aria-valuemin', '0');
+      meter.setAttribute('aria-valuemax', String(total));
+      meter.setAttribute('aria-valuenow', String(done));
+      meter.setAttribute('aria-label', 'Tasks complete');
+      var fill = document.createElement('span');
+      fill.className = 'meter-fill';
+      fill.style.width = (done / total) * 100 + '%';
+      meter.appendChild(fill);
+      head.appendChild(meter);
+    }
   }
+
+  var controls = document.createElement('div');
+  controls.className = 'controls';
 
   var cards = host.querySelectorAll('details.task');
   if (cards.length) {
@@ -635,14 +704,57 @@ document.addEventListener('DOMContentLoaded', function () {
     toggle.type = 'button';
     toggle.className = 'toggle';
     var open = false;
-    toggle.textContent = 'Expand all detail';
+    /* Name what actually expands. "Expand all detail" reads as though it might
+       unfold the whole document. */
+    toggle.textContent = 'Show all task details';
     toggle.addEventListener('click', function () {
       open = !open;
       [].slice.call(host.querySelectorAll('details.task')).forEach(function (d) { d.open = open; });
-      toggle.textContent = open ? 'Collapse all detail' : 'Expand all detail';
+      toggle.textContent = open ? 'Hide all task details' : 'Show all task details';
     });
-    head.appendChild(toggle);
+    controls.appendChild(toggle);
   }
+
+  /* Theme follows the OS by default. This only exists so a reader whose system is
+     dark can still read a long document on paper-white, or the reverse, without
+     changing their whole desktop. */
+  var THEMES = ['system', 'light', 'dark'];
+  var THEME_KEY = 'planit-theme';
+
+  function readTheme() {
+    try {
+      var v = window.localStorage.getItem(THEME_KEY);
+      return THEMES.indexOf(v) === -1 ? 'system' : v;
+    } catch (e) {
+      return 'system'; /* localStorage can be blocked for file:// origins */
+    }
+  }
+
+  function applyTheme(t) {
+    if (t === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', t);
+    try { window.localStorage.setItem(THEME_KEY, t); } catch (e) { /* not fatal */ }
+  }
+
+  var theme = readTheme();
+  applyTheme(theme);
+
+  var themeBtn = document.createElement('button');
+  themeBtn.type = 'button';
+  themeBtn.className = 'toggle theme';
+  function labelTheme() {
+    themeBtn.textContent = 'Theme: ' + theme;
+    themeBtn.setAttribute('aria-label', 'Colour theme: ' + theme + '. Click to change.');
+  }
+  labelTheme();
+  themeBtn.addEventListener('click', function () {
+    theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+    applyTheme(theme);
+    labelTheme();
+  });
+  controls.appendChild(themeBtn);
+
+  if (controls.childNodes.length) head.appendChild(controls);
 
   if (head.childNodes.length) toc.appendChild(head);
 

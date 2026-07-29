@@ -91,13 +91,40 @@ truthy(
   'a .task-name has untrimmed whitespace'
 );
 
-/* Progress meter, and that it agrees with the source rather than the DOM. */
+/* Task count, and that it agrees with the source rather than the DOM.
+ *
+ * The bar is deliberately conditional: a 0% bar at review time is noise, and the
+ * page is not re-rendered as work lands, so a full bar would mostly mean "this
+ * was rendered after the fact". Assert the readout for whichever state applies. */
+const noun = wantTotal === 1 ? 'task' : 'tasks';
+const wantCount =
+  wantDone === 0 ? `${wantTotal} ${noun}`
+  : wantDone < wantTotal ? `${wantDone} of ${wantTotal} done`
+  : `${wantTotal} ${noun} · all done`;
+eq('task count readout matches the plan', wantCount, doc.querySelector('.count')?.textContent);
+
 const bar = doc.querySelector('[role=progressbar]');
-truthy('progress meter is rendered', !!bar, 'no [role=progressbar]');
-eq('meter readout matches the plan', `${wantDone} / ${wantTotal} tasks`,
-  doc.querySelector('.count')?.textContent);
-eq('aria-valuenow matches', wantDone, bar?.getAttribute('aria-valuenow'));
-eq('aria-valuemax matches', wantTotal, bar?.getAttribute('aria-valuemax'));
+if (wantDone > 0 && wantDone < wantTotal) {
+  truthy('progress bar is drawn while part-done', !!bar, 'no [role=progressbar]');
+  eq('aria-valuenow matches', wantDone, bar?.getAttribute('aria-valuenow'));
+  eq('aria-valuemax matches', wantTotal, bar?.getAttribute('aria-valuemax'));
+} else {
+  truthy('no progress bar outside the part-done state', !bar,
+    `a bar was drawn at ${wantDone}/${wantTotal}`);
+}
+
+/* Controls must say what they act on. */
+const toggle = doc.querySelector('.toggle:not(.theme)');
+truthy('detail toggle names what it expands', /task details/i.test(toggle?.textContent ?? ''),
+  `toggle label was ${JSON.stringify(toggle?.textContent)}`);
+truthy('theme control is present', !!doc.querySelector('.toggle.theme'), 'no theme toggle');
+
+/* Sub-bullet labels are marked up so a task body scans as fields. */
+truthy('task detail labels are marked up', doc.querySelectorAll('.task-body .k').length > 0,
+  'no .k labels found in any task body');
+truthy('a known label was picked up',
+  [...doc.querySelectorAll('.task-body .k')].some((k) => k.textContent === 'Files:'),
+  'no "Files:" label was marked up');
 
 /* Nothing in a task body may be dropped. Every sub-bullet label in the source has
    to appear somewhere in the rendered page. */

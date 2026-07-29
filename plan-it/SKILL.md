@@ -81,25 +81,27 @@ Then `ExitPlanMode`.
 
 Always, no exceptions. Write the same plan content to `{worktree-root}/.claude/plan.md` — an absolute path from `pwd`, never `~/.claude/plan.md`. This is the cross-session handoff artifact build-it and ship-it read; skipping it breaks them in a fresh session. It stays uncommitted (`.claude/` is gitignored).
 
-Then render the reading view:
+Then render the reading view and open it:
 
 ```sh
-{skill-dir}/render-plan.sh "$PWD/.claude/plan.md" "$PWD/.claude/plan.html"
+{skill-dir}/render-plan.sh --open "$PWD/.claude/plan.md" "$PWD/.claude/plan.html"
 ```
 
 `{skill-dir}` is this skill's base directory, given to you when the skill loads — never a hardcoded user path. Both writes happen here, after `ExitPlanMode`, because plan mode permits no writes outside Claude's plan file.
 
-`plan.html` is generated: a single self-contained page that collapses each task's agent-facing sub-bullets so the human-facing names read at a glance. Never hand-edit it and never author the HTML yourself — the markdown is the source of truth and the script costs no tokens. Re-run the same command to refresh it after build-it ticks checkboxes.
+`plan.html` is generated: a single self-contained page that collapses each task's agent-facing sub-bullets so the human-facing names read at a glance. Never hand-edit it and never author the HTML yourself — the markdown is the source of truth and the script costs no tokens. Re-run the command *without* `--open` to refresh it after build-it ticks checkboxes.
+
+`--open` opens the page in the default browser. Don't paste a `file://` URL and call it clickable — terminals generally only linkify web URLs, so such a link has to be copied by hand, which defeats the point. The script skips opening in a remote session and prints where the file is instead.
 
 If the render fails, say so in one line and carry on with `plan.md`. A missing reading view never blocks the handoff.
 
 ### 6. Handoff to Execution
 
-Hand over the link, since the terminal is the worse place to read a plan:
+The page is already open, so the handoff is short:
 
-> Plan ready — read it here: file:///absolute/path/to/.claude/plan.html
+> Plan opened in your browser — `.claude/plan.html`.
 > Say the word and I'll execute it.
 
-Print the absolute `file://` URL so it is clickable, and don't open a browser. For complex work, wait for confirmation before proceeding; otherwise that line is the whole handoff. When the render failed, or the session is remote or containerized so the file isn't on the reader's machine, point at `.claude/plan.md` instead and don't apologize for it.
+Name the path as text so it's on record, and don't dress it up as a link. For complex work, wait for confirmation before proceeding; otherwise that line is the whole handoff. When the render failed, or the session is remote so the file isn't on the reader's machine, point at `.claude/plan.md` instead and don't apologize for it.
 
 When the user accepts ("looks good", "do it", "go ahead", "execute", "yes", "ship it"), invoke the `build-it` skill via the Skill tool before writing any code.

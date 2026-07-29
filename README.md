@@ -41,7 +41,9 @@ Tasks are checkboxes, each carrying the files it touches (cited `file:line`), th
 
 Every plan is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session.
 
-Alongside it, `plan-it` generates `.claude/plan.html` and hands you a `file://` link. Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. The HTML view collapses them behind each task's name, adds a sticky section index, a progress meter driven by the `- [x]` counts, and `file:line` chips — and prints cleanly.
+Alongside it, `plan-it` generates `.claude/plan.html` and opens it in your browser. Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. The HTML view collapses them behind each task's name, adds a sticky section index, a progress meter driven by the `- [x]` counts, and `file:line` chips — and prints cleanly.
+
+It opens the page rather than printing a `file://` link because terminals generally only linkify web URLs — Ghostty and Terminal.app both leave `file://` inert, so a printed link has to be copy-pasted, which is exactly the friction this is meant to remove. Pass `--open` to opt in; the script skips it in a remote session and tells you where the file is instead.
 
 It is a **generated read-only view**; the markdown is the source of truth. Nothing is ever hand-edited into the HTML, and no plan content passes through the model a second time to produce it — `render-plan.sh` is a shell concatenation of three templates, the plan source, and a vendored copy of [marked](https://github.com/markedjs/marked) (MIT, pinned in `plan-it/assets/MARKED-LICENSE.md`). The page opens with no network access.
 

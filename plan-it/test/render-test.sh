@@ -49,6 +49,34 @@ assert_has() {
 	fi
 }
 
+# truthy_file <label> <path>
+truthy_file() {
+	if [ -s "$2" ]; then
+		ok "$1"
+	else
+		no "$1" "missing or empty: $2"
+	fi
+}
+
+# assert_exit <label> <expected-code> <command...>
+# Defined up here with the other helpers on purpose: it was originally declared
+# further down, and a call site above the definition failed with "command not
+# found" while the suite still reported every check passing.
+assert_exit() {
+	label=$1
+	want=$2
+	shift 2
+	"$@" >/dev/null 2>"$TMP/stderr-case"
+	got=$?
+	if [ "$got" -ne "$want" ]; then
+		no "$label" "expected exit $want, got $got"
+	elif [ ! -s "$TMP/stderr-case" ]; then
+		no "$label" "exit $want but nothing on stderr"
+	else
+		ok "$label"
+	fi
+}
+
 printf '\nrender-plan.sh\n'
 
 # --- preconditions -----------------------------------------------------------
@@ -253,6 +281,55 @@ else
 	printf '  skip  plan-aware layer syntax check (node not found)\n'
 fi
 
+# --- --open ------------------------------------------------------------------
+# A file:// URL is not reliably clickable in a terminal, so the skill opens the
+# page instead of printing an address. PLAN_OPENER stands in for the real opener
+# so none of this launches a browser.
+
+RECORDER="$TMP/recorder.sh"
+cat >"$RECORDER" <<'REC'
+#!/bin/sh
+printf '%s\n' "$1" >>"$RECORD_TO"
+REC
+chmod +x "$RECORDER"
+
+RECORD_TO="$TMP/opened.log"
+export RECORD_TO
+
+: >"$RECORD_TO"
+if PLAN_OPENER="$RECORDER" "$RENDER" --open "$FIXTURE" "$TMP/open1.html" >/dev/null 2>&1; then
+	ok "--open exits 0"
+else
+	no "--open exits 0" "exit $?"
+fi
+assert_count "--open hands the rendered path to the opener" "$TMP/open1.html" "$(cat "$RECORD_TO")"
+
+: >"$RECORD_TO"
+PLAN_OPENER="$RECORDER" "$RENDER" "$FIXTURE" "$TMP/open2.html" >/dev/null 2>&1
+assert_count "without --open nothing is opened" 0 "$(wc -l <"$RECORD_TO" | tr -d ' ')"
+
+: >"$RECORD_TO"
+if SSH_CONNECTION="1.2.3.4 5 6.7.8.9 22" PLAN_OPENER="$RECORDER" \
+	"$RENDER" --open "$FIXTURE" "$TMP/open3.html" >/dev/null 2>"$TMP/ssh-note"; then
+	ok "--open in a remote session still exits 0"
+else
+	no "--open in a remote session still exits 0" "exit $?"
+fi
+assert_count "--open in a remote session does not open" 0 "$(wc -l <"$RECORD_TO" | tr -d ' ')"
+assert_has "--open in a remote session says where the file is" 'remote session' "$TMP/ssh-note"
+truthy_file "--open still writes the page in a remote session" "$TMP/open3.html"
+
+# A failing opener must not fail the render -- the page is on disk regardless.
+if PLAN_OPENER=/nonexistent/opener "$RENDER" --open "$FIXTURE" "$TMP/open4.html" \
+	>/dev/null 2>"$TMP/open-err"; then
+	ok "a broken opener still exits 0"
+else
+	no "a broken opener still exits 0" "exit $?"
+fi
+truthy_file "a broken opener still writes the page" "$TMP/open4.html"
+
+assert_exit "a flag in the path position exits 2" 2 "$RENDER" --bogus "$TMP/x.html"
+
 # --- behavioral checks in a real DOM (optional) -------------------------------
 # Everything above is text inspection, which cannot tell whether the transforms
 # actually do anything -- see the header of dom-test.mjs. When a jsdom install is
@@ -274,22 +351,6 @@ else
 fi
 
 # --- Spec 9: failure modes ---------------------------------------------------
-
-# assert_exit <label> <expected-code> <command...>
-assert_exit() {
-	label=$1
-	want=$2
-	shift 2
-	"$@" >/dev/null 2>"$TMP/stderr-case"
-	got=$?
-	if [ "$got" -ne "$want" ]; then
-		no "$label" "expected exit $want, got $got"
-	elif [ ! -s "$TMP/stderr-case" ]; then
-		no "$label" "exit $want but nothing on stderr"
-	else
-		ok "$label"
-	fi
-}
 
 MISSING_OUT="$TMP/should-not-exist.html"
 
