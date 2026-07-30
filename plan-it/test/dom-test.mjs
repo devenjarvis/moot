@@ -114,11 +114,22 @@ if (wantDone > 0 && wantDone < wantTotal) {
     `a bar was drawn at ${wantDone}/${wantTotal}`);
 }
 
-/* Controls must say what they act on, and expose their state. */
+/* Controls must say what they act on, sit with what they act on, and expose
+   their state. */
 const toggle = doc.querySelector('.detail-toggle');
 truthy('detail toggle names what it expands', /task details/i.test(toggle?.textContent ?? ''),
   `toggle label was ${JSON.stringify(toggle?.textContent)}`);
 eq('detail toggle reports collapsed state', 'false', toggle?.getAttribute('aria-expanded'));
+truthy('detail toggle sits in the plan, not the index',
+  !!doc.querySelector('#plan .detail-toggle') && !doc.querySelector('#toc .detail-toggle'),
+  'the toggle is still in the section index');
+truthy('detail toggle shares a line with the heading of the section it acts on',
+  !!toggle?.closest('.section-head')?.querySelector('h1, h2') ||
+  !!toggle?.closest('.tasks-bar'),
+  'the toggle is not attached to the tasks heading or a tasks bar');
+truthy('an inlined heading keeps its id for the index',
+  [...doc.querySelectorAll('.section-head h1, .section-head h2')].every((h) => !!h.id),
+  'an inlined heading lost its id, breaking its index link');
 
 const segButtons = [...doc.querySelectorAll('.seg button')];
 eq('theme control offers three options', 3, segButtons.length);
