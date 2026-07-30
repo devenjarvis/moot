@@ -182,45 +182,36 @@ code, pre, .loc { font-family: var(--mono); }
 }
 .detail-toggle[aria-expanded="true"] .caret { transform: rotate(45deg); }
 
-/* Theme control: a segmented control, so the current choice is visible and any
-   option is one click away. A single cycling button showed a value but hid the
-   action, which is the worst of both. */
-.seg {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border: 1px solid var(--rule);
-  border-radius: 7px;
-  overflow: hidden;
+/* Theme is a set-once preference, so it lives at the foot of the index and is
+   styled to be found when looked for and ignored otherwise -- no border, no
+   heading, and well out of the reading path. */
+.nav-foot {
+  margin-top: 1.5rem;
+  padding-top: .7rem;
+  border-top: 1px solid var(--rule);
 }
+
+.seg { display: flex; gap: .05rem; }
 
 .seg button {
   font: inherit;
-  font-size: .72rem;
-  font-weight: 550;
-  letter-spacing: .01em;
+  font-size: .7rem;
   color: var(--muted);
   background: transparent;
   border: 0;
-  border-left: 1px solid var(--rule);
-  padding: .34rem 0;
+  border-radius: 4px;
+  padding: .2rem .38rem;
   cursor: pointer;
+  opacity: .75;
 }
-.seg button:first-child { border-left: 0; }
-.seg button:hover { color: var(--ink); }
+.seg button:hover { color: var(--ink); opacity: 1; }
 .seg button[aria-pressed="true"] {
-  background: var(--chip-bg);
   color: var(--ink);
-}
-.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-
-.seg-label {
-  margin: 0 0 .35rem;
-  font-size: .68rem;
+  background: var(--chip-bg);
   font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--muted);
+  opacity: 1;
 }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 #toc ul { list-style: none; margin: 0; padding: 0; }
 
@@ -384,21 +375,56 @@ div.task {
 li.task-item { list-style: none; margin-left: -1.35rem; }
 
 .task-body {
-  padding: .2rem .9rem .8rem 1.95rem;
-  font-size: .93rem;
+  padding: .75rem .9rem .85rem 1.95rem;
+  font-size: .92rem;
   color: var(--ink);
 }
-.task-body ul { padding-left: 0; margin: 0; list-style: none; }
-.task-body li { margin: .45rem 0; color: var(--muted); }
-.task-body li > code { color: var(--chip-ink); }
+.task-body > ul { padding-left: 1.1rem; margin: 0; }
+.task-body li { margin: .3rem 0; color: var(--muted); }
+.task-body code { color: var(--chip-ink); }
 
-/* The sub-bullets are Label: value pairs. Giving the label weight turns a task
-   body from a paragraph you read into a table you scan. */
-.task-body .k {
+/* Once a task body is open, separate it from the row you clicked. */
+.task[open] > summary { border-bottom: 1px solid var(--rule); }
+
+/* The sub-bullets are not really a list -- they are Files/Signatures/Test
+   first/Implement/Verify/Boundaries fields. Setting them as a two-column field
+   table lets the eye run down the labels and stop at the one it wants, instead of
+   reading six bullets to find it. */
+.fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 1.1rem;
+  row-gap: .5rem;
+  margin: 0;
+}
+
+.fields dt {
   font-weight: 600;
+  font-size: .72rem;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fields dd {
+  margin: 0;
   color: var(--ink);
-  font-size: .78rem;
-  letter-spacing: .005em;
+}
+
+/* A sub-bullet that is not a Label: value pair spans the whole width rather than
+   being forced into the value column. */
+.fields dd.span { grid-column: 1 / -1; color: var(--muted); }
+
+.fields dd > ul, .fields dd > ol { margin: .3rem 0 0; padding-left: 1.1rem; }
+.fields dd > pre { margin: .4rem 0 .1rem; }
+
+/* Narrow viewports cannot afford a label column; stack instead. */
+@media (max-width: 700px) {
+  .fields { grid-template-columns: 1fr; row-gap: .15rem; }
+  .fields dt { margin-top: .5rem; }
+  .fields dd, .fields dd.span { grid-column: auto; }
 }
 
 /* --- fallback when the parser is unavailable ---------------------------- */
@@ -621,25 +647,75 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   buildTaskCards();
 
-  /* Give the sub-bullet labels -- Files:, Test first:, Verify: -- typographic
-     weight, so a task body scans as a set of fields rather than a paragraph. */
-  function labelTaskDetails() {
+  /* Recast a task's sub-bullets as a field table. They are Label: value pairs --
+     Files:, Test first:, Verify: -- so a definition list is what they actually
+     are, and it lets the eye run down the labels instead of reading every bullet.
+     Bullets that are not label-value pairs stay as full-width rows, and a list
+     with no labelled items at all is left exactly as it was. */
+  function fieldifyTaskBodies() {
     var LABEL = /^([A-Z][A-Za-z][A-Za-z ]{0,18}):\s/;
-    [].slice.call(host.querySelectorAll('.task-body li')).forEach(function (li) {
-      var first = li.firstChild;
-      if (!first || first.nodeType !== 3) return;
-      var m = LABEL.exec(first.nodeValue);
-      if (!m) return;
-      var k = document.createElement('span');
-      k.className = 'k';
-      /* Keep the colon in the text rather than adding it via CSS ::after, so that
-         copying a task body out of the page yields "Files: x.ts:1" as written. */
-      k.textContent = m[1] + ':';
-      first.nodeValue = ' ' + first.nodeValue.slice(m[0].length);
-      li.insertBefore(k, first);
+
+    /* Pure: reports the label without touching the DOM. The leading text node
+       carries it, and in a loose sub-list marked wraps that in a <p>. */
+    function labelOf(li) {
+      var holder = li;
+      if (li.firstChild && li.firstChild.nodeType === 1 && li.firstChild.tagName === 'P') {
+        holder = li.firstChild;
+      }
+      var first = holder.firstChild;
+      var m = first && first.nodeType === 3 ? LABEL.exec(first.nodeValue) : null;
+      return m ? { holder: holder, first: first, match: m } : null;
+    }
+
+    [].slice.call(host.querySelectorAll('.task-body > ul, .task-body > ol')).forEach(function (list) {
+      var items = [].slice.call(list.children);
+      if (!items.length) return;
+
+      /* Decide before mutating. Building the table first and only then checking
+         whether to keep it moved every item's children into a table that got
+         thrown away -- silently emptying any body that had no labels at all. */
+      if (!items.some(labelOf)) return;
+
+      var dl = document.createElement('dl');
+      dl.className = 'fields';
+
+      items.forEach(function (li) {
+        var found = labelOf(li);
+
+        if (found) {
+          var holder = found.holder;
+          var first = found.first;
+          var m = found.match;
+          var dt = document.createElement('dt');
+          dt.className = 'k';
+          /* Keep the colon in the text rather than adding it via CSS, so copying a
+             task body out of the page yields "Files: x.ts:1" as written. */
+          dt.textContent = m[1] + ':';
+          first.nodeValue = first.nodeValue.slice(m[0].length);
+
+          var dd = document.createElement('dd');
+          /* Move the whole remaining item, not just the first child: a field may
+             carry a nested list or a code block, and dropping any of it would
+             delete content the plan author wrote. */
+          while (holder.firstChild) dd.appendChild(holder.firstChild);
+          if (holder !== li) {
+            holder.remove();
+            while (li.firstChild) dd.appendChild(li.firstChild);
+          }
+          dl.appendChild(dt);
+          dl.appendChild(dd);
+        } else {
+          var full = document.createElement('dd');
+          full.className = 'span';
+          while (li.firstChild) full.appendChild(li.firstChild);
+          dl.appendChild(full);
+        }
+      });
+
+      list.replaceWith(dl);
     });
   }
-  labelTaskDetails();
+  fieldifyTaskBodies();
 
   /* --- location chips ---------------------------------------------------- */
 
@@ -829,15 +905,14 @@ document.addEventListener('DOMContentLoaded', function () {
   applyTheme(theme);
 
   var themeWrap = document.createElement('div');
-  var segLabel = document.createElement('p');
-  segLabel.className = 'seg-label';
-  segLabel.id = 'theme-label';
-  segLabel.textContent = 'Theme';
+  themeWrap.className = 'nav-foot';
 
   var seg = document.createElement('div');
   seg.className = 'seg';
   seg.setAttribute('role', 'group');
-  seg.setAttribute('aria-labelledby', 'theme-label');
+  /* No visible heading: the control is deliberately quiet, so the group carries
+     its own accessible name instead of spending a line of the index on a label. */
+  seg.setAttribute('aria-label', 'Colour theme');
 
   var segButtons = THEMES.map(function (name) {
     var b = document.createElement('button');
@@ -859,9 +934,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   paintSeg();
 
-  themeWrap.appendChild(segLabel);
   themeWrap.appendChild(seg);
-  controls.appendChild(themeWrap);
 
   if (controls.childNodes.length) head.appendChild(controls);
 
@@ -882,6 +955,9 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     toc.appendChild(list);
   }
+
+  /* Last thing in the index, after the sections: set once, then ignored. */
+  toc.appendChild(themeWrap);
 
   /* Highlight the section being read. */
   if (links.length && 'IntersectionObserver' in window) {

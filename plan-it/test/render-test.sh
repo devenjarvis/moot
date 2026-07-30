@@ -201,7 +201,7 @@ assert_has "em-dash survives" '—' "$TMP/decoded.md"
 assert_has "arrow survives" '→' "$TMP/decoded.md"
 assert_has "file:line reference survives" 'path/to/file.ts:42' "$TMP/decoded.md"
 assert_count "fixture carries 4 checked tasks" 4 "$(count_str '- [x]' "$TMP/decoded.md")"
-assert_count "fixture carries 2 unchecked tasks" 2 "$(count_str '- [ ]' "$TMP/decoded.md")"
+assert_count "fixture carries 4 unchecked tasks" 4 "$(count_str '- [ ]' "$TMP/decoded.md")"
 
 # --- plan-aware layer is bundled ---------------------------------------------
 # These are string checks, not behavior: they only prove the layer was
@@ -241,7 +241,7 @@ if command -v node >/dev/null 2>&1; then
 
 	if [ -n "$SHAPE" ]; then
 		set -- $SHAPE
-		assert_count "marked emits 6 checkboxes for the fixture" 6 "$4"
+		assert_count "marked emits 8 checkboxes for the fixture" 8 "$4"
 		assert_count "marked marks 4 of them checked" 4 "$3"
 
 		if [ "$1" -gt 0 ] || [ "$2" -gt 0 ]; then

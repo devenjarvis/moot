@@ -64,6 +64,7 @@ const wantDone = (plan.match(/^- \[x\] /gm) || []).length;
 
 const { doc, errors } = await render(true);
 const q = (s) => doc.querySelectorAll(s).length;
+const bodyText = doc.getElementById('plan').textContent;
 
 truthy('page renders with no scripting errors', errors.length === 0, errors[0]);
 
@@ -150,17 +151,34 @@ truthy('controls stay in the sans stack', /\.detail-toggle[^{]*\{[^}]*\}|--sans/
   'chrome does not opt into --sans');
 eq('no web font is fetched', 0, (css.match(/@font-face|fonts\.googleapis|fonts\.gstatic/g) || []).length);
 
-/* Sub-bullet labels are marked up so a task body scans as fields. */
-truthy('task detail labels are marked up', doc.querySelectorAll('.task-body .k').length > 0,
-  'no .k labels found in any task body');
+/* Task bodies are recast as field tables: Label: value pairs become dt/dd on a
+   two-column grid so the eye can run down the labels. */
+truthy('task bodies become field tables', doc.querySelectorAll('.task-body dl.fields').length > 0,
+  'no dl.fields found in any task body');
 truthy('a known label was picked up',
-  [...doc.querySelectorAll('.task-body .k')].some((k) => k.textContent === 'Files:'),
+  [...doc.querySelectorAll('.fields dt')].some((k) => k.textContent === 'Files:'),
   'no "Files:" label was marked up');
+eq('every label has a value beside it',
+  doc.querySelectorAll('.fields dt').length,
+  doc.querySelectorAll('.fields dd:not(.span)').length);
+
+/* A bullet that is not a Label: value pair must survive as a full-width row
+   rather than being forced into the value column or dropped. */
+truthy('unlabelled bullets become full-width rows',
+  doc.querySelectorAll('.fields dd.span').length > 0, 'no dd.span rows found');
+truthy('an unlabelled bullet keeps its text',
+  bodyText.includes('A bare bullet with no label'), 'the unlabelled bullet text is gone');
+
+/* A body with no labels at all must be left exactly as it was. Converting it and
+   only then deciding not to keep the result silently emptied such bodies. */
+truthy('a body with no labels is left as a plain list',
+  bodyText.includes('just a bullet, which must survive verbatim') &&
+  bodyText.includes('and another, which must also survive'),
+  'an all-unlabelled task body lost its content');
 
 /* Nothing in a task body may be dropped. Every sub-bullet label in the source has
    to appear somewhere in the rendered page. */
 const labels = ['Files:', 'Test first:', 'Implement:', 'Verify:', 'Boundaries:', 'Signatures:'];
-const bodyText = doc.getElementById('plan').textContent;
 const missing = labels.filter((l) => plan.includes(l) && !bodyText.includes(l));
 truthy('no task-body content was dropped', missing.length === 0, `missing: ${missing.join(', ')}`);
 

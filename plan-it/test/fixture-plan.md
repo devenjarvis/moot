@@ -73,7 +73,7 @@ FIXTURE-SENTINEL-FENCE
   - Files: path/to/fourth.ts:100
   - Test first: assert the unchecked count is 2.
   - Implement: nothing — fixture content only.
-  - Verify: progress readout shows 4 / 6.
+  - Verify: progress readout shows 4 of 8 done.
   - Boundaries: stays unchecked.
 
 - [ ] Leave the fifth task unchecked
@@ -84,6 +84,15 @@ FIXTURE-SENTINEL-FENCE
   - Boundaries: stays unchecked.
 
 - [x] Carry no sub-bullets at all, to exercise the bare-task shape
+
+- [ ] Mix labelled and unlabelled sub-bullets
+  - Files: path/to/mixed.ts:5
+  - A bare bullet with no label, which must become a full-width row
+  - Verify: `sh plan-it/test/render-test.sh` exits 0.
+
+- [ ] Carry a body with no labels whatsoever
+  - just a bullet, which must survive verbatim
+  - and another, which must also survive
 
 ## Parallelism
 
