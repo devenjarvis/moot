@@ -1,11 +1,16 @@
 #!/bin/sh
 # Render a plan markdown file to a single self-contained HTML page.
 #
-#   render-plan.sh [--open] <plan.md> <out.html>
+#   render-plan.sh [--open] [--draft] <plan.md> <out.html>
 #
-# --open  Open the rendered page in the default browser. Skipped in a remote
-#         session, or when no platform opener exists. Never fails the render:
-#         the page is written either way.
+# --open   Open the rendered page in the default browser. Skipped in a remote
+#          session, or when no platform opener exists. Never fails the render:
+#          the page is written either way.
+#
+# --draft  Mark the page as an unapproved draft. plan-it renders the preview it
+#          opens before the approval gate with this flag, so a page the reader has
+#          not signed off on says so; the render after approval omits it, and the
+#          banner going away is the signal that approval landed.
 #
 # Exit codes:
 #   0  rendered (whether or not it opened)
@@ -21,14 +26,16 @@
 set -e
 
 usage() {
-	printf 'usage: %s [--open] <plan.md> <out.html>\n' "$(basename "$0")" >&2
+	printf 'usage: %s [--open] [--draft] <plan.md> <out.html>\n' "$(basename "$0")" >&2
 	exit 2
 }
 
 do_open=no
+is_draft=no
 while [ $# -gt 0 ]; do
 	case $1 in
 	--open) do_open=yes; shift ;;
+	--draft) is_draft=yes; shift ;;
 	--) shift; break ;;
 	--*) usage ;;
 	*) break ;;
@@ -95,11 +102,21 @@ trap 'rm -f "$tmp"' EXIT INT TERM
 # whole class: no byte of the plan can terminate the block, and the decode is
 # exact. The cost is that the embedded source is no longer readable in a text
 # editor -- acceptable, since plan.md sits next to it and is the source of truth.
+#
+# --draft sets a global the plan-aware layer reads. It is emitted *after* the
+# parser, not before: a statement placed ahead of a bundle whose first line is
+# "use strict" would demote that directive to a no-op expression for the entire
+# script block. marked v16.4.2 has no such prologue, but re-pinning it could add
+# one, and the resulting breakage would be silent. After the bundle the statement
+# still runs long before DOMContentLoaded, so nothing is lost by being careful.
 {
 	cat "$assets/template-head.html"
 	base64 <"$src"
 	cat "$assets/template-mid.html"
 	cat "$assets/marked.umd.js"
+	if [ "$is_draft" = yes ]; then
+		printf 'window.__planDraft = true;\n'
+	fi
 	cat "$assets/template-tail.html"
 } >"$tmp"
 

@@ -330,6 +330,50 @@ truthy_file "a broken opener still writes the page" "$TMP/open4.html"
 
 assert_exit "a flag in the path position exits 2" 2 "$RENDER" --bogus "$TMP/x.html"
 
+# --- --draft -----------------------------------------------------------------
+# The preview plan-it opens before the approval gate is rendered with --draft, so
+# the page can say it is not approved yet. The flag sets one global that the
+# plan-aware layer reads; everything else about the render is identical.
+
+# Match the emitted statement, not the bare identifier: the plan-aware layer in
+# template-head.html also mentions window.__planDraft in order to read it, so a
+# looser pattern hits in every render and the absence check can never fail.
+DRAFT_STMT='window.__planDraft = true;'
+
+DRAFT_OUT="$TMP/draft.html"
+if "$RENDER" --draft "$FIXTURE" "$DRAFT_OUT" >/dev/null 2>"$TMP/draft-err"; then
+	ok "--draft exits 0"
+else
+	no "--draft exits 0" "exit $?; stderr: $(cat "$TMP/draft-err")"
+fi
+truthy_file "--draft writes the page" "$DRAFT_OUT"
+assert_count "--draft sets the draft flag once" 1 "$(count_str "$DRAFT_STMT" "$DRAFT_OUT")"
+assert_count "a default render sets no draft flag" 0 "$(count_str "$DRAFT_STMT" "$OUT")"
+
+# The flag is emitted AFTER the vendored parser on purpose. A statement placed
+# before it would demote a top-of-file "use strict" to a no-op expression for the
+# whole script block -- marked has no such prologue today, but re-pinning it could
+# introduce one, and the failure would be silent and total.
+draft_line=$(grep -nF -- "$DRAFT_STMT" "$DRAFT_OUT" | head -1 | cut -d: -f1)
+marked_line=$(grep -nF -- 'a markdown parser' "$DRAFT_OUT" | head -1 | cut -d: -f1)
+if [ -n "$draft_line" ] && [ -n "$marked_line" ] && [ "$draft_line" -gt "$marked_line" ]; then
+	ok "the draft flag is emitted after the vendored parser"
+else
+	no "the draft flag is emitted after the vendored parser" \
+		"flag at line ${draft_line:-none}, parser at line ${marked_line:-none}"
+fi
+
+# --draft and --open are independent and must compose in either order.
+: >"$RECORD_TO"
+if PLAN_OPENER="$RECORDER" "$RENDER" --draft --open "$FIXTURE" "$TMP/draft-open.html" \
+	>/dev/null 2>&1; then
+	ok "--draft composes with --open"
+else
+	no "--draft composes with --open" "exit $?"
+fi
+assert_count "--draft --open hands the rendered path to the opener" \
+	"$TMP/draft-open.html" "$(cat "$RECORD_TO")"
+
 # --- behavioral checks in a real DOM (optional) -------------------------------
 # Everything above is text inspection, which cannot tell whether the transforms
 # actually do anything -- see the header of dom-test.mjs. When a jsdom install is
@@ -340,7 +384,7 @@ DOM_TEST="$DIR/dom-test.mjs"
 if command -v node >/dev/null 2>&1 && [ -f "$DOM_TEST" ] &&
 	node -e 'import(process.env.JSDOM_PATH || "jsdom").then(()=>process.exit(0),()=>process.exit(1))' 2>/dev/null; then
 	printf '\n  -- DOM checks --\n'
-	if node "$DOM_TEST" "$OUT" "$FIXTURE"; then
+	if node "$DOM_TEST" "$OUT" "$FIXTURE" "$DRAFT_OUT"; then
 		ok "behavioral DOM checks pass"
 	else
 		no "behavioral DOM checks pass" "see the DOM check output above"

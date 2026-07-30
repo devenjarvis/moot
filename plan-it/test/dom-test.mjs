@@ -13,13 +13,17 @@
  *     JSDOM_PATH=/abs/path/to/node_modules/jsdom/lib/api.js \
  *       sh plan-it/test/render-test.sh
  *
- * Usage: node dom-test.mjs <rendered.html> <source-plan.md>
+ * Usage: node dom-test.mjs <rendered.html> <source-plan.md> [draft-rendered.html]
+ *
+ * The third argument is optional: pass a --draft render of the same plan to also
+ * check the unapproved-draft banner. Without it those checks are skipped rather
+ * than silently passing.
  */
 
 import fs from 'node:fs';
 import { TextDecoder } from 'node:util';
 
-const [file, planPath] = process.argv.slice(2);
+const [file, planPath, draftFile] = process.argv.slice(2);
 
 const { JSDOM, VirtualConsole } = await import(process.env.JSDOM_PATH || 'jsdom');
 
@@ -47,16 +51,18 @@ function truthy(label, cond, detail) {
 
 /* injectTextDecoder=false exercises the percent-decode fallback, since jsdom's
    window has no TextDecoder of its own. */
-async function render(injectTextDecoder) {
+async function renderFile(path, injectTextDecoder) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', (e) => errors.push(e.message));
   const opts = { runScripts: 'dangerously', virtualConsole: vc };
   if (injectTextDecoder) opts.beforeParse = (w) => { w.TextDecoder = TextDecoder; };
-  const dom = new JSDOM(fs.readFileSync(file, 'utf8'), opts);
+  const dom = new JSDOM(fs.readFileSync(path, 'utf8'), opts);
   await new Promise((r) => dom.window.addEventListener('load', r));
   return { doc: dom.window.document, errors };
 }
+
+const render = (injectTextDecoder) => renderFile(file, injectTextDecoder);
 
 const plan = fs.readFileSync(planPath, 'utf8');
 const wantTotal = (plan.match(/^- \[[ x]\] /gm) || []).length;
@@ -245,6 +251,128 @@ truthy('an inline script in the plan did not execute',
 truthy('the raw markup is shown as text instead',
   bodyText.includes('<img src=') && bodyText.includes('<script>window.FIXTURE_PWNED'),
   'the raw markup was neither rendered nor displayed');
+
+/* Collapsed reference sections.
+ *
+ * Context, Reuse and Risks are background for the building agent; folding them
+ * keeps the goal, the criteria and the task names in one screen. Everything the
+ * reader reviews for correctness has to stay open. */
+const sectionOf = (name) =>
+  [...doc.querySelectorAll('#plan details.section > summary > h2')]
+    .find((h) => h.textContent.trim().toLowerCase() === name)?.closest('details.section');
+
+truthy('reference sections were folded', q('#plan details.section') > 0,
+  'no details.section elements -- the transform is inert');
+for (const name of ['context', 'reuse', 'risks']) {
+  const sec = sectionOf(name);
+  truthy(`${name} is folded`, !!sec, `no details.section for ${name}`);
+  truthy(`${name} starts closed`, sec && !sec.open, `${name} was open on load`);
+}
+
+/* The heading must be the summary, not buried in the body. Inside a closed
+   disclosure it would give the index an entry that appears to do nothing -- the
+   exact failure the `headings` filter was written to prevent. */
+truthy('a folded section keeps its heading visible as the summary',
+  [...doc.querySelectorAll('#plan details.section')].every((s) => s.querySelector(':scope > summary > h2')),
+  'a folded section has no h2 in its summary');
+truthy('a folded section heading keeps its id for the index',
+  [...doc.querySelectorAll('#plan details.section > summary > h2')].every((h) => !!h.id),
+  'a folded heading has no id, so its index link is dead');
+truthy('every folded section has an index entry pointing at it',
+  ['context', 'reuse', 'risks'].every((name) => {
+    const h = sectionOf(name)?.querySelector(':scope > summary > h2');
+    return h && [...doc.querySelectorAll('#toc a')].some((a) => a.hash === `#${h.id}`);
+  }),
+  'a folded section is missing from the section index');
+
+/* Only the reference sections fold. Goal, Spec, Tasks and the rest are what the
+   reader is reviewing, so they must not be hidden behind a click. */
+const foldedNames = [...doc.querySelectorAll('#plan details.section > summary > h2')]
+  .map((h) => h.textContent.trim().toLowerCase());
+eq('nothing outside the reference sections was folded', '',
+  foldedNames.filter((n) => !['context', 'reuse', 'risks'].includes(n)).join(','));
+truthy('the tasks section is not folded',
+  !foldedNames.includes('tasks') && q('#plan .task') > 0,
+  'the Tasks section was folded');
+
+/* Content must survive the move. A transform that wrapped the heading but dropped
+   the body would leave a page that looks right and says nothing. */
+truthy('a folded section keeps its body',
+  ['context', 'reuse', 'risks'].every((name) =>
+    (sectionOf(name)?.querySelector('.section-body')?.textContent.trim().length ?? 0) > 0),
+  'a folded section has an empty body');
+truthy('folded sections report how much they hide',
+  [...doc.querySelectorAll('#plan details.section')].every((s) =>
+    /\d+ items?/.test(s.querySelector('.section-count')?.textContent ?? '')),
+  'a folded section has no item count in its summary');
+
+/* Print must reveal them: a printout is read away from the disclosure controls, and
+   a page that printed without Context gives the reader no hint anything is missing.
+ *
+ * Driven by dispatching the real events rather than grepping the handler's
+ * selector. A source-text check here passed whether or not the handler had been
+ * widened, since the .section CSS above it satisfied the pattern on its own. */
+{
+  const win = doc.defaultView;
+  const all = () => [...doc.querySelectorAll('#plan details.task, #plan details.section')];
+  const closedBefore = all().filter((d) => !d.open).length;
+  truthy('there is something folded to reveal', closedBefore > 0, 'nothing was closed to begin with');
+
+  win.dispatchEvent(new win.Event('beforeprint'));
+  eq('printing opens every folded disclosure', 0, all().filter((d) => !d.open).length);
+  truthy('printing opens the reference sections specifically',
+    [...doc.querySelectorAll('#plan details.section')].every((s) => s.open),
+    'a reference section stayed closed for the print');
+
+  win.dispatchEvent(new win.Event('afterprint'));
+  eq('the reader gets their fold state back afterwards',
+    closedBefore, all().filter((d) => !d.open).length);
+}
+
+/* The unapproved-draft banner.
+ *
+ * plan-it opens the preview before the approval gate, so a page the reader has not
+ * signed off on has to say so -- otherwise the preview and the approved plan are
+ * indistinguishable, and a plan.html newer than plan.md reads as authoritative. */
+truthy('a default render carries no draft banner', !doc.querySelector('.draft'),
+  'a .draft element appeared without --draft');
+
+if (draftFile) {
+  const { doc: draftDoc, errors: draftErrors } = await renderFile(draftFile, true);
+  truthy('draft render has no scripting errors', draftErrors.length === 0, draftErrors[0]);
+
+  const banner = draftDoc.querySelector('.draft');
+  truthy('a --draft render carries a draft banner', !!banner, 'no .draft element');
+  truthy('the banner says the plan is not approved yet',
+    /draft/i.test(banner?.textContent ?? '') && /approve?d/i.test(banner?.textContent ?? ''),
+    `banner text was ${JSON.stringify(banner?.textContent)}`);
+
+  /* Outside #plan, so it cannot be mistaken for plan content and is not swept up
+     by any transform that walks the plan body. */
+  truthy('the banner sits outside the plan body', !!banner && !banner.closest('#plan'),
+    'the banner was placed inside #plan');
+  truthy('the banner precedes the plan',
+    !!banner && !!draftDoc.querySelector('.layout') &&
+    (banner.compareDocumentPosition(draftDoc.querySelector('.layout')) &
+      draftDoc.defaultView.Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    'the banner does not come before .layout');
+
+  /* The flag must change nothing else. A draft that renders a different plan than
+     the approved one would make the review worthless. */
+  eq('the draft render produces the same card count',
+    q('.task'), draftDoc.querySelectorAll('.task').length);
+  eq('the draft render produces the same plan text',
+    doc.getElementById('plan').textContent.length,
+    draftDoc.getElementById('plan').textContent.length);
+
+  /* A printed draft must still say draft: a plan read on paper is exactly where
+     "is this approved?" is least recoverable. */
+  truthy('the banner is not hidden in print',
+    !/@media print[\s\S]*?\.draft[^{]*\{[^}]*display:\s*none/.test(css),
+    'a print rule hides the draft banner');
+} else {
+  console.log('  skip  draft banner checks (no draft render passed as argv[3])');
+}
 
 /* The decode fallback must produce the same document as TextDecoder. */
 const fallback = await render(false);
