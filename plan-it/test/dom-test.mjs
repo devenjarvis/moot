@@ -113,11 +113,42 @@ if (wantDone > 0 && wantDone < wantTotal) {
     `a bar was drawn at ${wantDone}/${wantTotal}`);
 }
 
-/* Controls must say what they act on. */
-const toggle = doc.querySelector('.toggle:not(.theme)');
+/* Controls must say what they act on, and expose their state. */
+const toggle = doc.querySelector('.detail-toggle');
 truthy('detail toggle names what it expands', /task details/i.test(toggle?.textContent ?? ''),
   `toggle label was ${JSON.stringify(toggle?.textContent)}`);
-truthy('theme control is present', !!doc.querySelector('.toggle.theme'), 'no theme toggle');
+eq('detail toggle reports collapsed state', 'false', toggle?.getAttribute('aria-expanded'));
+
+const segButtons = [...doc.querySelectorAll('.seg button')];
+eq('theme control offers three options', 3, segButtons.length);
+eq('theme options are labelled', 'Auto,Light,Dark', segButtons.map((b) => b.textContent).join(','));
+eq('exactly one theme option is selected', 1,
+  segButtons.filter((b) => b.getAttribute('aria-pressed') === 'true').length);
+eq('the selected theme defaults to Auto', 'Auto',
+  segButtons.find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent);
+
+/* These documents load at an opaque origin, where jsdom throws on localStorage --
+   the same condition some browsers impose on file:// URLs. So this doubles as the
+   check that a blocked store degrades to "theme still switches, just doesn't
+   persist" rather than taking the page down. */
+const dark = segButtons.find((b) => b.textContent === 'Dark');
+dark.click();
+eq('choosing a theme applies it even when the store is blocked', 'dark',
+  doc.documentElement.getAttribute('data-theme'));
+eq('choosing a theme updates the pressed option', 'true', dark.getAttribute('aria-pressed'));
+segButtons.find((b) => b.textContent === 'Auto').click();
+truthy('returning to Auto hands control back to the OS',
+  !doc.documentElement.hasAttribute('data-theme'), 'data-theme was left set');
+
+/* Prose is serif, interface chrome is sans -- both from system stacks, since a
+   web font would need the network the page must not touch. */
+const css = fs.readFileSync(file, 'utf8');
+truthy('prose uses a serif stack', /--serif:[^;]*\bui-serif\b/.test(css), 'no ui-serif in --serif');
+truthy('body is set in the serif stack', /font:\s*[^;]*var\(--serif\)/.test(css), 'body does not use --serif');
+truthy('controls stay in the sans stack', /\.detail-toggle[^{]*\{[^}]*\}|--sans/.test(css) &&
+  /#toc[^{]*\.task-body \.k \{ font-family: var\(--sans\); \}|font-family: var\(--sans\)/.test(css),
+  'chrome does not opt into --sans');
+eq('no web font is fetched', 0, (css.match(/@font-face|fonts\.googleapis|fonts\.gstatic/g) || []).length);
 
 /* Sub-bullet labels are marked up so a task body scans as fields. */
 truthy('task detail labels are marked up', doc.querySelectorAll('.task-body .k').length > 0,
