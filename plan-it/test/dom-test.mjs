@@ -157,9 +157,12 @@ truthy('returning to Auto hands control back to the OS',
 const css = fs.readFileSync(file, 'utf8');
 truthy('prose uses a serif stack', /--serif:[^;]*\bui-serif\b/.test(css), 'no ui-serif in --serif');
 truthy('body is set in the serif stack', /font:\s*[^;]*var\(--serif\)/.test(css), 'body does not use --serif');
-truthy('controls stay in the sans stack', /\.detail-toggle[^{]*\{[^}]*\}|--sans/.test(css) &&
-  /#toc[^{]*\.task-body \.k \{ font-family: var\(--sans\); \}|font-family: var\(--sans\)/.test(css),
-  'chrome does not opt into --sans');
+/* Name the selectors rather than matching "--sans" anywhere: :root defines that
+   token, so the loose version passed no matter which elements opted in. */
+const sansRule = css.match(/([^\n{]*)\{\s*font-family: var\(--sans\);\s*\}/);
+truthy('the chrome selectors opt into the sans stack',
+  !!sansRule && ['#toc', '.detail-toggle', '.seg', '.fields dt'].every((s) => sansRule[1].includes(s)),
+  `sans rule covers ${JSON.stringify(sansRule?.[1]?.trim())}`);
 eq('no web font is fetched', 0, (css.match(/@font-face|fonts\.googleapis|fonts\.gstatic/g) || []).length);
 
 /* Task bodies are recast as field tables: Label: value pairs become dt/dd on a
@@ -193,15 +196,55 @@ const labels = ['Files:', 'Test first:', 'Implement:', 'Verify:', 'Boundaries:',
 const missing = labels.filter((l) => plan.includes(l) && !bodyText.includes(l));
 truthy('no task-body content was dropped', missing.length === 0, `missing: ${missing.join(', ')}`);
 
+/* The mixed-list write path: a task list that also holds plain bullets is
+   rewritten in place. It had no coverage at all, and a mutation that deleted every
+   such card left the suite green. */
+truthy('tasks in a mixed list are rewritten in place',
+  doc.querySelectorAll('li.task-item .task').length > 0, 'no in-place task cards found');
+truthy('a task in a mixed list keeps its name',
+  bodyText.includes('MIXED-SENTINEL-TASK') && bodyText.includes('MIXED-SENTINEL-DONE'),
+  'a mixed-list task lost its name');
+truthy('plain bullets around a mixed-list task keep their order', (() => {
+  const list = [...doc.querySelectorAll('#plan ul')].find((u) => u.querySelector('li.task-item'));
+  const text = [...(list?.children ?? [])].map((li) => li.textContent.trim().slice(0, 24));
+  return text[0]?.startsWith('A plain bullet leading') &&
+    text.at(-1)?.startsWith('A plain bullet closing');
+})(), 'the mixed list was reordered');
+
 /* Section index and location chips. */
 truthy('section index has links', q('#toc a') > 0, 'no nav links');
-eq('no chip was injected inside a code sample', 0, q('code code.loc, pre code.loc'));
+truthy('index entries point at real targets',
+  [...doc.querySelectorAll('#toc a')].every((a) => doc.getElementById(a.hash.slice(1))),
+  'an index link points at no element');
+truthy('no index entry targets something inside a collapsed task',
+  [...doc.querySelectorAll('#toc a')].every((a) =>
+    !doc.getElementById(a.hash.slice(1))?.parentNode.closest('.task-body')),
+  'an index link targets a heading buried in a task body');
 
-/* Raw HTML in a plan must be inert. */
+/* Chips: assert they are produced, not merely absent from the wrong places. A
+   deleted chipLocations() call used to leave every chip assertion green. */
+truthy('location chips are produced', q('code.loc') > 0, 'no .loc chips at all');
+truthy('a known file:line became a chip',
+  [...doc.querySelectorAll('code.loc')].some((c) => c.textContent === 'path/to/file.ts:42'),
+  'path/to/file.ts:42 was not chipped');
+eq('no chip was injected inside a code sample', 0, q('code code.loc, pre code.loc'));
+eq('no chip was injected inside a link', 0, q('a code.loc'));
+
+/* Raw HTML in a plan must be inert. The fixture carries unbackticked img, iframe,
+   style, script and div tags, so these assertions have something to catch -- with
+   a fixture free of raw HTML they were vacuous. */
+truthy('the fixture actually contains raw HTML to escape', /<img src=|<iframe|<script>window/.test(plan),
+  'the fixture has no raw HTML, so the inertness checks below prove nothing');
 eq('no image element was injected', 0, q('#plan img'));
 eq('no script element was injected', 0, q('#plan script'));
 eq('no style element was injected', 0, q('#plan style'));
 eq('no iframe was injected', 0, q('#plan iframe'));
+eq('no positioned block element was injected', 0, q('#plan div[style]'));
+truthy('an inline script in the plan did not execute',
+  doc.defaultView.FIXTURE_PWNED === undefined, 'the plan executed script');
+truthy('the raw markup is shown as text instead',
+  bodyText.includes('<img src=') && bodyText.includes('<script>window.FIXTURE_PWNED'),
+  'the raw markup was neither rendered nor displayed');
 
 /* The decode fallback must produce the same document as TextDecoder. */
 const fallback = await render(false);

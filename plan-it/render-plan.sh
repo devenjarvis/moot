@@ -9,7 +9,8 @@
 #
 # Exit codes:
 #   0  rendered (whether or not it opened)
-#   2  bad usage, unreadable input, or missing output directory
+#   1  an I/O failure, e.g. the output path is not writable
+#   2  bad usage, unreadable input, missing output directory, or output == input
 #   3  a template asset is missing
 #
 # This script knows nothing about markdown. It concatenates the templates, the
@@ -25,17 +26,19 @@ usage() {
 }
 
 do_open=no
-if [ "$1" = "--open" ]; then
-	do_open=yes
-	shift
-fi
+while [ $# -gt 0 ]; do
+	case $1 in
+	--open) do_open=yes; shift ;;
+	--) shift; break ;;
+	--*) usage ;;
+	*) break ;;
+	esac
+done
 
 [ $# -eq 2 ] || usage
 
 src=$1
 out=$2
-
-case $src in --*) usage ;; esac
 
 # Logical cd, not physical: this script is reached through the
 # ~/.claude/skills/plan-it symlink, and the assets sit beside it in both views.
@@ -55,6 +58,18 @@ fi
 out_dir=$(dirname -- "$out")
 if [ ! -d "$out_dir" ]; then
 	printf '%s: output directory does not exist: %s\n' "$(basename "$0")" "$out_dir" >&2
+	exit 2
+fi
+
+# Refuse to write over the plan. The caller is handed two near-identical paths
+# (.claude/plan.md and .claude/plan.html), so one slip would replace the source of
+# truth -- the artifact build-it and ship-it read -- with its own rendering, and
+# exit 0 while doing it.
+src_real=$(CDPATH= cd -- "$(dirname -- "$src")" && pwd)/$(basename -- "$src")
+out_real=$(CDPATH= cd -- "$out_dir" && pwd)/$(basename -- "$out")
+if [ "$src_real" = "$out_real" ]; then
+	printf '%s: refusing to overwrite the plan with its own rendering: %s\n' \
+		"$(basename "$0")" "$src" >&2
 	exit 2
 fi
 

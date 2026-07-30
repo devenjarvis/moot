@@ -41,7 +41,7 @@ Tasks are checkboxes, each carrying the files it touches (cited `file:line`), th
 
 Every plan is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session.
 
-Alongside it, `plan-it` generates `.claude/plan.html` and opens it in your browser. Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. The HTML view collapses them behind each task's name, adds a sticky section index, a progress meter driven by the `- [x]` counts, and `file:line` chips — and prints cleanly.
+Alongside it, `plan-it` generates `.claude/plan.html` and opens it in your browser. Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. The HTML view collapses them behind each task's name, sets each task's `Files:`/`Verify:`/`Boundaries:` sub-bullets as a two-column field table, and adds a sticky section index, a task count taken from the `- [x]` counts, and `file:line` chips — and prints cleanly. The count only grows a progress bar while a plan is part-done: a 0% bar at review time is noise, and since the page is not re-rendered as work lands, a full one would mostly mean "rendered after the fact".
 
 It opens the page rather than printing a `file://` link because terminals generally only linkify web URLs — Ghostty and Terminal.app both leave `file://` inert, so a printed link has to be copy-pasted, which is exactly the friction this is meant to remove. Pass `--open` to opt in; the script skips it in a remote session and tells you where the file is instead.
 
@@ -111,6 +111,7 @@ moot/
     test/
       fixture-plan.md      # Plan exercising every construct the renderer must survive
       render-test.sh       # Assertions that need no browser
+      dom-test.mjs         # Behavioral assertions run in a real DOM, when jsdom is reachable
   build-it/
     SKILL.md          # Build-it skill definition
     implementer-prompt.md  # Template for subagent dispatch

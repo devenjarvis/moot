@@ -31,7 +31,7 @@
 
 /* Follow the OS unless the reader has explicitly chosen light. Long-form reading
    and terminal work don't always want the same thing, so the choice is theirs;
-   `data-theme` is set from localStorage before first paint of the body content. */
+   `data-theme` is applied from localStorage as soon as the plan renders. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #15161a;
@@ -446,7 +446,10 @@ li.task-item { list-style: none; margin-left: -1.35rem; }
     --rule: #bbb; --accent: #000; --done: #333;
     --chip-bg: #f2f2f2; --chip-ink: #000;
   }
-  .skip, #toc { display: none; }
+  /* The disclosure control moved out of the index and into the plan body, so it
+     has to be hidden here explicitly or it prints beside the Tasks heading. */
+  .skip, #toc, .detail-toggle { display: none; }
+  .section-head { display: block; }
   .layout { display: block; max-width: none; padding: 0; }
   #plan { max-width: none; }
   body { font-size: 11pt; }
@@ -660,7 +663,11 @@ document.addEventListener('DOMContentLoaded', function () {
      Bullets that are not label-value pairs stay as full-width rows, and a list
      with no labelled items at all is left exactly as it was. */
   function fieldifyTaskBodies() {
-    var LABEL = /^([A-Z][A-Za-z][A-Za-z ]{0,18}):\s/;
+    /* `:$` as well as `:\s`, so a label whose value is entirely a nested list --
+       "Files:" on its own line, paths beneath it -- is still recognised as a
+       field. Otherwise it became a full-width row, which also left the list
+       starting with a dd that had no dt. */
+    var LABEL = /^([A-Z][A-Za-z][A-Za-z ]{0,18}):(?:\s|$)/;
 
     /* Pure: reports the label without touching the DOM. The leading text node
        carries it, and in a loose sub-list marked wraps that in a <p>. */
@@ -694,7 +701,6 @@ document.addEventListener('DOMContentLoaded', function () {
           var first = found.first;
           var m = found.match;
           var dt = document.createElement('dt');
-          dt.className = 'k';
           /* Keep the colon in the text rather than adding it via CSS, so copying a
              task body out of the page yields "Files: x.ts:1" as written. */
           dt.textContent = m[1] + ':';
@@ -802,7 +808,13 @@ document.addEventListener('DOMContentLoaded', function () {
     return s;
   }
 
-  var headings = [].slice.call(host.querySelectorAll('h1, h2'));
+  /* Section headings only. A heading that ended up inside a task body -- whether
+     the author put it there or markdown produced one by accident -- would give the
+     index an entry whose target sits inside a collapsed disclosure, so clicking it
+     appears to do nothing. */
+  var headings = [].slice.call(host.querySelectorAll('h1, h2')).filter(function (h) {
+    return !h.parentNode.closest('.task-body');
+  });
   var used = {};
   var links = [];
 
@@ -883,28 +895,54 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     /* The control belongs with what it acts on, not in the global index. Sit it on
-       the Tasks heading's own line where its scope is unambiguous; if there is no
-       heading above the cards, fall back to a bar directly over them. */
-    var group = host.querySelector('.tasks');
-    var heading = null;
-    for (var prev = group; prev; prev = prev.previousElementSibling) {
-      if (/^H[1-6]$/.test(prev.tagName)) { heading = prev; break; }
+       the Tasks heading's own line where its scope is unambiguous; failing that,
+       put a bar directly above the cards.
+     *
+     * The anchor cannot just be the first `.tasks` group. A plan whose task list
+     * also holds plain bullets is rewritten in place, so no `.tasks` group exists
+     * at all -- and dereferencing that null threw, which killed every transform
+     * below this point: no index, no count, no toggle, no theme, no print
+     * handling. So fall back to the first card, and ignore anything nested inside
+     * another task's body, or the global control lands inside a collapsed
+     * disclosure it is meant to open. */
+    function topLevel(sel) {
+      return [].slice.call(host.querySelectorAll(sel)).filter(function (el) {
+        return !el.parentNode.closest('.task-body');
+      })[0] || null;
     }
 
-    if (heading) {
-      var sectionHead = document.createElement('div');
-      sectionHead.className = 'section-head';
-      heading.parentNode.insertBefore(sectionHead, heading);
-      /* The rule and spacing move to the wrapper, or the border would only span
-         the heading's own width instead of the full measure. */
-      heading.classList.add('inlined');
-      sectionHead.appendChild(heading);
-      sectionHead.appendChild(toggle);
-    } else {
-      var bar = document.createElement('div');
-      bar.className = 'tasks-bar';
-      bar.appendChild(toggle);
-      group.parentNode.insertBefore(bar, group);
+    var anchor = topLevel('.tasks') || topLevel('.task');
+
+    if (anchor) {
+      /* Walk up to the block that sits directly in the plan body: an in-place card
+         is nested in an <li>, and its siblings are other list items, not the
+         section heading we are looking for. */
+      var block = anchor;
+      while (block.parentElement && block.parentElement !== host) block = block.parentElement;
+
+      /* h2 and below only. Wrapping the h1 steals the goal sentence out of
+         `h1 + p`, which is both the tab title and the lead paragraph's styling. */
+      var heading = null;
+      for (var prev = block.previousElementSibling; prev; prev = prev.previousElementSibling) {
+        if (/^H[2-6]$/.test(prev.tagName)) { heading = prev; break; }
+        if (/^H1$/.test(prev.tagName)) break;
+      }
+
+      if (heading) {
+        var sectionHead = document.createElement('div');
+        sectionHead.className = 'section-head';
+        heading.parentNode.insertBefore(sectionHead, heading);
+        /* The rule and spacing move to the wrapper, or the border would only span
+           the heading's own width instead of the full measure. */
+        heading.classList.add('inlined');
+        sectionHead.appendChild(heading);
+        sectionHead.appendChild(toggle);
+      } else {
+        var bar = document.createElement('div');
+        bar.className = 'tasks-bar';
+        block.parentNode.insertBefore(bar, block);
+        bar.appendChild(toggle);
+      }
     }
   }
 

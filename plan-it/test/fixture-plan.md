@@ -35,6 +35,17 @@ FIXTURE-SENTINEL-FENCE
 <p>text after the closing tag must still render</p>
 ```
 
+### Raw markup that must stay inert
+
+Unbackticked HTML, so the escaping is actually exercised rather than assumed. None
+of this may become a live element, load anything, or run:
+
+- An image: <img src="https://example.invalid/pixel.png" alt="must not load">
+- A frame: <iframe src="https://example.invalid/frame"></iframe>
+- A style block: <style>body { background: #f00 }</style>
+- A script: <script>window.FIXTURE_PWNED = 1</script>
+- A bare block element: <div style="position:fixed;inset:0">must not cover the page</div>
+
 ## Reuse
 
 - Nothing to reuse — this is a fixture, and the absence is the point.
@@ -93,6 +104,20 @@ FIXTURE-SENTINEL-FENCE
 - [ ] Carry a body with no labels whatsoever
   - just a bullet, which must survive verbatim
   - and another, which must also survive
+
+## Follow-up tasks
+
+A second task list that also holds plain bullets, so the in-place rewrite path is
+covered. No `.tasks` group is produced for this list at all, which is what made the
+whole nav layer throw when the anchor lookup assumed one existed.
+
+- A plain bullet leading the list
+- [ ] MIXED-SENTINEL-TASK a task inside a mixed list
+  - Files: path/to/inplace.ts:9
+  - Verify: the card renders in place, keeping document order.
+- A plain bullet between tasks
+- [x] MIXED-SENTINEL-DONE a checked task inside a mixed list
+- A plain bullet closing the list
 
 ## Parallelism
 

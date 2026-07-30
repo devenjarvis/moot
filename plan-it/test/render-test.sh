@@ -200,8 +200,8 @@ assert_has "unbackticked generic survives" 'Map<string, Foo>' "$TMP/decoded.md"
 assert_has "em-dash survives" '—' "$TMP/decoded.md"
 assert_has "arrow survives" '→' "$TMP/decoded.md"
 assert_has "file:line reference survives" 'path/to/file.ts:42' "$TMP/decoded.md"
-assert_count "fixture carries 4 checked tasks" 4 "$(count_str '- [x]' "$TMP/decoded.md")"
-assert_count "fixture carries 4 unchecked tasks" 4 "$(count_str '- [ ]' "$TMP/decoded.md")"
+assert_count "fixture carries 5 checked tasks" 5 "$(count_str '- [x]' "$TMP/decoded.md")"
+assert_count "fixture carries 5 unchecked tasks" 5 "$(count_str '- [ ]' "$TMP/decoded.md")"
 
 # --- plan-aware layer is bundled ---------------------------------------------
 # These are string checks, not behavior: they only prove the layer was
@@ -214,7 +214,7 @@ assert_has "task-card transform is bundled" 'buildTaskCards' "$OUT"
 assert_has "location-chip transform is bundled" 'chipLocations' "$OUT"
 assert_has "progress meter markup is bundled" 'progressbar' "$OUT"
 assert_has "section-index scrollspy is bundled" 'IntersectionObserver' "$OUT"
-assert_has "raw-HTML escaping is bundled" 'renderer:' "$OUT"
+assert_has "raw-HTML escaping is bundled" 'escapeHtml' "$OUT"
 assert_has "page decodes the embedded payload" 'atob(' "$OUT"
 assert_has "page decodes as UTF-8, not latin1" 'TextDecoder' "$OUT"
 
@@ -241,8 +241,8 @@ if command -v node >/dev/null 2>&1; then
 
 	if [ -n "$SHAPE" ]; then
 		set -- $SHAPE
-		assert_count "marked emits 8 checkboxes for the fixture" 8 "$4"
-		assert_count "marked marks 4 of them checked" 4 "$3"
+		assert_count "marked emits 10 checkboxes for the fixture" 10 "$4"
+		assert_count "marked marks 5 of them checked" 5 "$3"
 
 		if [ "$1" -gt 0 ] || [ "$2" -gt 0 ]; then
 			ok "fixture produces a checkbox shape the transform handles ($1 loose, $2 tight)"
@@ -376,10 +376,55 @@ for a in template-head.html template-mid.html template-tail.html; do
 done
 assert_exit "missing asset exits 3" 3 "$TMP/fake/render-plan.sh" "$FIXTURE" "$TMP/fake/out.html"
 
-# No temp files may survive any of the failure paths above. TMPDIR is this run's
-# own directory, so anything found here was leaked by this run.
+# Writing the rendered page over the plan would destroy the source of truth, and
+# the caller is handed two near-identical paths.
+cp "$FIXTURE" "$TMP/self.md"
+assert_exit "refuses to render a plan over itself" 2 "$RENDER" "$TMP/self.md" "$TMP/self.md"
+if cmp -s "$TMP/self.md" "$FIXTURE"; then
+	ok "the plan is left untouched when input and output are the same path"
+else
+	no "the plan is left untouched when input and output are the same path" "the plan was overwritten"
+fi
+assert_exit "refuses via a non-canonical path to the same file" 2 \
+	"$RENDER" "$TMP/self.md" "$TMP/./self.md"
+
+# Every failure path above returns before mktemp, so on its own the leak check
+# below proves nothing. Force a failure *after* the temp file exists by making the
+# output directory unwritable, which is what actually exercises the cleanup trap.
+RO="$TMP/readonly"
+mkdir -p "$RO"
+: >"$RO/stale.html"
+printf 'OLD CONTENT\n' >"$RO/stale.html"
+chmod 555 "$RO"
+if "$RENDER" "$FIXTURE" "$RO/stale.html" >/dev/null 2>&1; then
+	no "an unwritable output exits non-zero" "exited 0"
+else
+	ok "an unwritable output exits non-zero"
+fi
+assert_has "an unwritable output leaves the previous page intact" 'OLD CONTENT' "$RO/stale.html"
+chmod 755 "$RO"
+
+# TMPDIR is this run's own directory, so anything found here was leaked by this
+# run -- including by the post-mktemp failure just forced above.
 leaked=$(find "$TMP" -maxdepth 1 -name 'render-plan.*' 2>/dev/null | wc -l | tr -d ' ')
-assert_count "no temp files leaked" 0 "$leaked"
+assert_count "no temp files leaked, including after a post-mktemp failure" 0 "$leaked"
+
+# --- the vendored parser matches its recorded checksum ------------------------
+# MARKED-LICENSE.md is cited as the thing that catches an unintended marked
+# change, so verify it rather than trusting it.
+
+LICENSE="$DIR/../assets/MARKED-LICENSE.md"
+MARKED="$DIR/../assets/marked.umd.js"
+if command -v shasum >/dev/null 2>&1; then
+	want=$(grep -o '[0-9a-f]\{64\}' "$LICENSE" | head -1)
+	got=$(shasum -a 256 "$MARKED" | cut -d' ' -f1)
+	assert_count "vendored marked matches the checksum in MARKED-LICENSE.md" "$want" "$got"
+	wantb=$(grep -o '| Bytes | [0-9]* |' "$LICENSE" | grep -o '[0-9]*')
+	gotb=$(wc -c <"$MARKED" | tr -d ' ')
+	assert_count "vendored marked matches the recorded byte count" "$wantb" "$gotb"
+else
+	printf '  skip  vendored marked checksum (shasum not found)\n'
+fi
 
 # --- summary ----------------------------------------------------------------
 
