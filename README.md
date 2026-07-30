@@ -39,9 +39,11 @@ Plans are written to Claude Code's built-in plan file (not separate documents in
 
 Tasks are checkboxes, each carrying the files it touches (cited `file:line`), the test to write first, the change to make, how to verify it, and what it must not touch. `/build-it` ticks the boxes as it goes, so the plan doubles as a progress ledger across sessions.
 
-Every plan is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session.
+Once you approve a plan it is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session. It is written only on approval: a `plan.md` for a plan you rejected would be picked up as real work by the next session.
 
-Alongside it, `plan-it` generates `.claude/plan.html` and opens it in your browser. Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. The HTML view collapses them behind each task's name, sets each task's `Files:`/`Verify:`/`Boundaries:` sub-bullets as a two-column field table, and adds a sticky section index, a task count taken from the `- [x]` counts, and `file:line` chips — and prints cleanly. The count only grows a progress bar while a plan is part-done: a 0% bar at review time is noise, and since the page is not re-rendered as work lands, a full one would mostly mean "rendered after the fact".
+`plan-it` generates `.claude/plan.html` and opens it in your browser **before** asking you to approve — you review the plan in the reading view and give feedback there, and each round of feedback re-renders the same page. Until you approve, the page carries a "not yet approved" draft banner; approving re-renders it without one, so the banner going away is the signal that the plan landed.
+
+Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. Context, Reuse and Risks are the same — reference material the building agent looks things up in. The HTML view folds both out of the way: task sub-bullets behind each task's name, and those three sections behind their own headings, leaving the goal, the acceptance criteria and the task names to read at a glance. What you are checking for correctness stays open. It also sets each task's `Files:`/`Verify:`/`Boundaries:` sub-bullets as a two-column field table, and adds a sticky section index, a task count taken from the `- [x]` counts, and `file:line` chips — and prints cleanly, with everything folded opened for the printout and put back afterwards. The count only grows a progress bar while a plan is part-done: a 0% bar at review time is noise, and since the page is not re-rendered as work lands, a full one would mostly mean "rendered after the fact".
 
 It opens the page rather than printing a `file://` link because terminals generally only linkify web URLs — Ghostty and Terminal.app both leave `file://` inert, so a printed link has to be copy-pasted, which is exactly the friction this is meant to remove. Pass `--open` to opt in; the script skips it in a remote session and tells you where the file is instead.
 
@@ -53,7 +55,7 @@ Because it is generated, it goes stale as `/build-it` ticks checkboxes. Refresh 
 plan-it/render-plan.sh .claude/plan.md .claude/plan.html
 ```
 
-The same script renders any plan markdown, including the archived plans under `~/.claude/plans/`.
+Full usage is `render-plan.sh [--open] [--draft] <plan.md> <out.html>`; `--draft` is what stamps the page as not yet approved. The same script renders any plan markdown, including the archived plans under `~/.claude/plans/`.
 
 ### `/build-it`
 
