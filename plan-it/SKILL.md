@@ -77,12 +77,31 @@ Plan principles: tasks describe intent and boundaries, never step-by-step code; 
 
 Then `ExitPlanMode`.
 
-### 5. Write the Handoff File
+### 5. Write the Handoff File, Then Render It
 
 Always, no exceptions. Write the same plan content to `{worktree-root}/.claude/plan.md` — an absolute path from `pwd`, never `~/.claude/plan.md`. This is the cross-session handoff artifact build-it and ship-it read; skipping it breaks them in a fresh session. It stays uncommitted (`.claude/` is gitignored).
 
+Then render the reading view and open it:
+
+```sh
+{skill-dir}/render-plan.sh --open "$PWD/.claude/plan.md" "$PWD/.claude/plan.html"
+```
+
+`{skill-dir}` is this skill's base directory, given to you when the skill loads — never a hardcoded user path. Both writes happen here, after `ExitPlanMode`, because plan mode permits no writes outside Claude's plan file.
+
+`plan.html` is generated: a single self-contained page that collapses each task's agent-facing sub-bullets so the human-facing names read at a glance. Never hand-edit it and never author the HTML yourself — the markdown is the source of truth and the script costs no tokens. Re-run the command *without* `--open` to refresh it after build-it ticks checkboxes.
+
+`--open` opens the page in the default browser. Don't paste a `file://` URL and call it clickable — terminals generally only linkify web URLs, so such a link has to be copied by hand, which defeats the point. The script skips opening in a remote session and prints where the file is instead.
+
+If the render fails, say so in one line and carry on with `plan.md`. A missing reading view never blocks the handoff.
+
 ### 6. Handoff to Execution
 
-For complex work, present the plan summary and wait for confirmation. Otherwise tell the user: "Plan ready. Say the word and I'll execute it."
+The page is already open, so the handoff is short:
+
+> Plan opened in your browser — `.claude/plan.html`.
+> Say the word and I'll execute it.
+
+Name the path as text so it's on record, and don't dress it up as a link. For complex work, wait for confirmation before proceeding; otherwise that line is the whole handoff. When the render failed, or the session is remote so the file isn't on the reader's machine, point at `.claude/plan.md` instead and don't apologize for it.
 
 When the user accepts ("looks good", "do it", "go ahead", "execute", "yes", "ship it"), invoke the `build-it` skill via the Skill tool before writing any code.

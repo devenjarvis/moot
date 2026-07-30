@@ -1,0 +1,1078 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementation Plan</title>
+<style>
+/* No web fonts, no remote stylesheet imports, no remote background images --
+   the page must open with no network access at all. */
+
+:root {
+  --bg: #fbfbf9;
+  --panel: #ffffff;
+  --ink: #1b1c1a;
+  --muted: #6a6b66;
+  --rule: #e3e3de;
+  --accent: #2b5fa8;
+  --done: #3f7d58;
+  --chip-bg: #f0f0ea;
+  --chip-ink: #44453f;
+  --measure: 66ch;
+
+  /* Serif for the prose, sans for the interface. All three are system stacks --
+     a web font would need the network the page is not allowed to touch.
+     `ui-serif` resolves to New York on Apple platforms; Charter and Iowan Old
+     Style ship with macOS; Georgia is the broad fallback. */
+  --serif: ui-serif, "New York", Charter, "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Follow the OS unless the reader has explicitly chosen light. Long-form reading
+   and terminal work don't always want the same thing, so the choice is theirs;
+   `data-theme` is applied from localStorage as soon as the plan renders. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15161a;
+    --panel: #1c1e23;
+    --ink: #e7e7e3;
+    --muted: #9a9b95;
+    --rule: #2c2f36;
+    --accent: #83aded;
+    --done: #6fbf8f;
+    --chip-bg: #24272d;
+    --chip-ink: #c4c6c0;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15161a;
+  --panel: #1c1e23;
+  --ink: #e7e7e3;
+  --muted: #9a9b95;
+  --rule: #2c2f36;
+  --accent: #83aded;
+  --done: #6fbf8f;
+  --chip-bg: #24272d;
+  --chip-ink: #c4c6c0;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  /* Serif wants a little more size and leading than the sans it replaced. */
+  font: 17px/1.7 var(--serif);
+  font-feature-settings: "kern";
+  font-optical-sizing: auto;
+}
+
+code, pre, .loc { font-family: var(--mono); }
+
+/* Interface chrome stays sans: the index, the controls, table headers, and the
+   sub-bullet labels are things you look at, not things you read. */
+#toc, .seg, .detail-toggle, .count, #plan th, .fields dt { font-family: var(--sans); }
+
+.skip { position: absolute; left: -9999px; }
+.skip:focus {
+  left: 1rem; top: 1rem; z-index: 10;
+  background: var(--panel); color: var(--ink);
+  padding: .5rem .85rem; border: 1px solid var(--rule); border-radius: 6px;
+}
+
+/* --- layout ------------------------------------------------------------- */
+
+.layout { padding: 1.5rem 1.25rem 6rem; }
+
+@media (min-width: 900px) {
+  .layout {
+    display: grid;
+    grid-template-columns: 16rem minmax(0, 1fr);
+    gap: 3.5rem;
+    max-width: calc(16rem + 3.5rem + var(--measure) + 6rem);
+    margin: 0 auto;
+    padding: 2.5rem 2rem 6rem;
+    align-items: start;
+  }
+}
+
+#plan { max-width: var(--measure); }
+
+/* --- section index ------------------------------------------------------ */
+
+#toc {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (min-width: 900px) {
+  #toc {
+    position: sticky;
+    top: 2.5rem;
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 0;
+  }
+}
+
+.nav-head { margin-bottom: 1.25rem; }
+
+.count {
+  margin: 0 0 .5rem;
+  font-size: .8rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meter {
+  height: 5px;
+  background: var(--rule);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.meter-fill { display: block; height: 100%; background: var(--done); }
+
+/* The Tasks heading and the control that acts on it share a line. */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 2.75rem 0 .9rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--rule);
+}
+#plan h2.inlined { margin: 0; padding-top: 0; border-top: 0; }
+
+.tasks-bar { display: flex; justify-content: flex-end; margin: 1.25rem 0 .4rem; }
+
+/* Disclosure control: a quiet row with a caret, not a pill. */
+.detail-toggle {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: .45rem;
+  font: inherit;
+  font-size: .76rem;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: .3rem .45rem;
+  margin-right: -.45rem;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.detail-toggle:hover { color: var(--ink); background: var(--chip-bg); }
+.detail-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.detail-toggle .caret {
+  flex: none;
+  width: .38rem;
+  height: .38rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .12s ease;
+}
+.detail-toggle[aria-expanded="true"] .caret { transform: rotate(45deg); }
+
+/* Theme is a set-once preference, so it lives at the foot of the index and is
+   styled to be found when looked for and ignored otherwise -- no border, no
+   heading, and well out of the reading path. */
+.nav-foot {
+  margin-top: 1.5rem;
+  padding-top: .7rem;
+  border-top: 1px solid var(--rule);
+}
+
+.seg { display: flex; gap: .05rem; }
+
+.seg button {
+  font: inherit;
+  font-size: .7rem;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: .2rem .38rem;
+  cursor: pointer;
+  opacity: .75;
+}
+.seg button:hover { color: var(--ink); opacity: 1; }
+.seg button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--chip-bg);
+  font-weight: 600;
+  opacity: 1;
+}
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#toc ul { list-style: none; margin: 0; padding: 0; }
+
+#toc a {
+  display: block;
+  padding: .28rem 0 .28rem .7rem;
+  border-left: 2px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .875rem;
+  line-height: 1.35;
+}
+#toc a:hover { color: var(--ink); }
+#toc a.active { color: var(--accent); border-left-color: var(--accent); }
+#toc .lvl-h1 > a { font-weight: 650; color: var(--ink); }
+
+/* --- prose -------------------------------------------------------------- */
+
+#plan h1 {
+  font-size: 1.8rem;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -.012em;
+  margin: 0 0 1.4rem;
+}
+
+#plan h2 {
+  font-size: 1.22rem;
+  font-weight: 600;
+  margin: 2.75rem 0 .9rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--rule);
+}
+
+#plan h3 { font-size: 1.02rem; font-weight: 600; margin: 1.9rem 0 .6rem; }
+
+/* The goal sentence sits directly under the h1 and carries the whole plan. */
+#plan h1 + p { font-size: 1.08rem; color: var(--ink); }
+
+#plan p, #plan li { overflow-wrap: break-word; }
+#plan ul, #plan ol { padding-left: 1.35rem; }
+#plan li { margin: .35rem 0; }
+
+#plan ol > li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+#plan a { color: var(--accent); text-underline-offset: 2px; }
+
+#plan > ul > li > strong:first-child { color: var(--ink); }
+
+#plan code {
+  font-size: .875em;
+  background: var(--chip-bg);
+  color: var(--chip-ink);
+  padding: .1em .35em;
+  border-radius: 4px;
+}
+
+#plan pre {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: .9rem 1rem;
+  overflow-x: auto;
+  font-size: .84rem;
+  line-height: 1.55;
+}
+#plan pre code { background: none; padding: 0; font-size: inherit; }
+
+.loc {
+  font-size: .84em !important;
+  white-space: nowrap;
+}
+
+/* --- tables ------------------------------------------------------------- */
+
+.table-scroll { overflow-x: auto; margin: 1.1rem 0; }
+
+#plan table { border-collapse: collapse; font-size: .9rem; min-width: 100%; }
+#plan th, #plan td {
+  text-align: left;
+  padding: .5rem .8rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+#plan th {
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* --- task cards --------------------------------------------------------- */
+
+.tasks { display: flex; flex-direction: column; gap: .5rem; margin: 1.25rem 0; }
+
+.task {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.task > summary {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  padding: .7rem .9rem;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 8px;
+}
+.task > summary::-webkit-details-marker { display: none; }
+
+/* Disclosure caret, drawn rather than loaded. */
+.task > summary::before {
+  content: "";
+  flex: none;
+  width: .42rem;
+  height: .42rem;
+  margin-top: .38rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform .12s ease;
+}
+.task[open] > summary::before { transform: rotate(45deg); }
+
+.task > summary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+/* 600 not 550: the serif fallbacks (Georgia, Palatino) are not variable fonts and
+   would round an in-between weight back to regular. */
+.task-name { font-weight: 600; }
+
+.task.done { border-left: 3px solid var(--done); }
+.task.done .task-name { color: var(--muted); }
+
+/* The badge hangs off the summary for a disclosure and off the row itself for a
+   task with no sub-bullets, which has no summary to hang it on. */
+.task.done > summary::after,
+div.task.done::after {
+  content: "done";
+  margin-left: auto;
+  flex: none;
+  font-size: .68rem;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--done);
+}
+
+/* A task with no sub-bullets is a plain row, not a disclosure. */
+div.task {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  padding: .7rem .9rem .7rem 1.9rem;
+}
+
+/* A task inside a list that also holds ordinary bullets stays in place, so the
+   reader's ordering is preserved; the list marker would just be noise. */
+li.task-item { list-style: none; margin-left: -1.35rem; }
+
+.task-body {
+  padding: .75rem .9rem .85rem 1.95rem;
+  font-size: .92rem;
+  color: var(--ink);
+}
+.task-body > ul { padding-left: 1.1rem; margin: 0; }
+.task-body li { margin: .3rem 0; color: var(--muted); }
+.task-body code { color: var(--chip-ink); }
+
+/* Once a task body is open, separate it from the row you clicked. */
+.task[open] > summary { border-bottom: 1px solid var(--rule); }
+
+/* The sub-bullets are not really a list -- they are Files/Signatures/Test
+   first/Implement/Verify/Boundaries fields. Setting them as a two-column field
+   table lets the eye run down the labels and stop at the one it wants, instead of
+   reading six bullets to find it. */
+.fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 1.1rem;
+  row-gap: .5rem;
+  margin: 0;
+}
+
+.fields dt {
+  font-weight: 600;
+  font-size: .72rem;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fields dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* A sub-bullet that is not a Label: value pair spans the whole width rather than
+   being forced into the value column. */
+.fields dd.span { grid-column: 1 / -1; color: var(--muted); }
+
+.fields dd > ul, .fields dd > ol { margin: .3rem 0 0; padding-left: 1.1rem; }
+.fields dd > pre { margin: .4rem 0 .1rem; }
+
+/* Narrow viewports cannot afford a label column; stack instead. */
+@media (max-width: 700px) {
+  .fields { grid-template-columns: 1fr; row-gap: .15rem; }
+  .fields dt { margin-top: .5rem; }
+  .fields dd, .fields dd.span { grid-column: auto; }
+}
+
+/* --- fallback when the parser is unavailable ---------------------------- */
+
+.raw { white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: .85rem; }
+
+/* --- print -------------------------------------------------------------- */
+
+@media print {
+  :root {
+    --bg: #fff; --panel: #fff; --ink: #000; --muted: #333;
+    --rule: #bbb; --accent: #000; --done: #333;
+    --chip-bg: #f2f2f2; --chip-ink: #000;
+  }
+  /* The disclosure control moved out of the index and into the plan body, so it
+     has to be hidden here explicitly or it prints beside the Tasks heading. */
+  .skip, #toc, .detail-toggle { display: none; }
+  .section-head { display: block; }
+  .layout { display: block; max-width: none; padding: 0; }
+  #plan { max-width: none; }
+  body { font-size: 11pt; }
+  #plan h2 { break-after: avoid; }
+  .task { break-inside: avoid; border: 1px solid var(--rule); }
+  .task > summary::before, .task > summary { cursor: auto; }
+  #plan pre, .table-scroll { overflow: visible; }
+  #plan a { color: #000; }
+}
+</style>
+<script>
+/* The plan-aware layer.
+ *
+ * Runs on DOMContentLoaded, which fires after every synchronous script in the
+ * document -- including the vendored marked payload further down -- so the
+ * global `marked` is guaranteed to exist by then.
+ *
+ * Everything here is presentation. The markdown in #plan-src is the source of
+ * truth; this file is generated by render-plan.sh and must never be hand-edited.
+ */
+document.addEventListener('DOMContentLoaded', function () {
+  var host = document.getElementById('plan');
+  var toc = document.getElementById('toc');
+  var srcEl = document.getElementById('plan-src');
+  if (!host || !srcEl || !toc) return;
+
+  /* --- source ------------------------------------------------------------ */
+
+  /* render-plan.sh embeds the plan base64-encoded, so no byte of it can end the
+     block early and the decode is exact -- see the comment there for why a
+     textual escape is not a round trip.
+   *
+   * atob alone is not enough: it yields latin1, and plans are full of em-dashes
+   * and arrows. TextDecoder is the right tool and every real browser has had it
+   * for years, but it is not universal in every embedded or headless DOM, and one
+   * missing global should not blank the whole page -- so fall back to
+   * percent-decoding, which reassembles multi-byte UTF-8 correctly too. */
+  function utf8(bytes) {
+    if (typeof TextDecoder !== 'undefined') return new TextDecoder('utf-8').decode(bytes);
+    var pct = '';
+    for (var i = 0; i < bytes.length; i++) pct += '%' + ('0' + bytes[i].toString(16)).slice(-2);
+    try {
+      return decodeURIComponent(pct);
+    } catch (e) {
+      /* Malformed UTF-8. TextDecoder would substitute U+FFFD and carry on, so the
+         fallback must not be the stricter of the two -- blanking the page over a
+         stray byte is worse than showing it as latin1. */
+      var s = '';
+      for (var j = 0; j < bytes.length; j++) s += String.fromCharCode(bytes[j]);
+      return s;
+    }
+  }
+
+  var src;
+  try {
+    var b64 = srcEl.textContent.replace(/\s+/g, '');
+    src = utf8(Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); }));
+  } catch (e) {
+    host.textContent = 'Could not decode the embedded plan: ' + e.message +
+      '\nRead .claude/plan.md instead.';
+    host.className = 'raw';
+    return;
+  }
+
+  if (typeof marked === 'undefined') {
+    host.textContent = src;
+    host.className = 'raw';
+    return;
+  }
+
+  /* Raw HTML in a plan is prose *about* markup, not markup to run. Rendering it
+     as literal text keeps the page faithful and stops a plan that mentions a
+     bare tag from restyling the document or loading a remote resource. */
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  var md = new marked.Marked();
+  md.use({ renderer: { html: function (token) { return escapeHtml(token.text); } } });
+  host.innerHTML = md.parse(src);
+
+  /* --- task cards -------------------------------------------------------- */
+
+  /* The name is what a human scans; the nested list is for the coding agent.
+     Collapsing the nested list by default is the whole point of this view.
+   *
+   * marked emits two different shapes and BOTH have to be handled. A tight list
+   * puts the checkbox directly in the item:
+   *     <li><input type="checkbox"> Name<ul>...</ul></li>
+   * A loose list -- which is what the plan format actually produces, because it
+   * leaves a blank line between tasks -- wraps the content in a paragraph:
+   *     <li><p><input type="checkbox">\nName</p><ul>...</ul></li>
+   * Matching only the tight shape makes this whole transform silently inert on
+   * every real plan, so `parts` resolves the checkbox and the node holding the
+   * name for either one. */
+  function parts(li) {
+    var box = li.querySelector(':scope > input[type=checkbox]');
+    var nameHost = li;
+    if (!box) {
+      var p = li.querySelector(':scope > p');
+      var inP = p && p.querySelector(':scope > input[type=checkbox]');
+      if (inP) { box = inP; nameHost = p; }
+    }
+    if (!box) return null;
+    return { box: box, nameHost: nameHost };
+  }
+
+  /* Where the name stops and the collapsible body begins, for the tight shape. */
+  var BLOCK = /^(?:UL|OL|PRE|P|TABLE|BLOCKQUOTE|DIV|HR|H[1-6])$/;
+
+  function buildCard(li) {
+    var p = parts(li);
+    if (!p) return null;
+    var done = p.box.checked;
+
+    /* Split the item into the name and everything else. "Everything else" must be
+       *all* of it, not just the first sub-list: a task may carry an extra
+       paragraph, a fenced code block, a table, or a second list, and dropping any
+       of that would silently delete content the plan author wrote. */
+    var nameNodes = [];
+    var bodyNodes = [];
+
+    if (p.nameHost !== li) {
+      /* Loose: the leading paragraph is the name, every other child is body. */
+      [].slice.call(p.nameHost.childNodes).forEach(function (n) {
+        if (n !== p.box) nameNodes.push(n);
+      });
+      [].slice.call(li.childNodes).forEach(function (n) {
+        if (n !== p.nameHost) bodyNodes.push(n);
+      });
+    } else {
+      /* Tight: the name runs until the first block-level child. */
+      var inName = true;
+      [].slice.call(li.childNodes).forEach(function (n) {
+        if (n === p.box) return;
+        if (inName && n.nodeType === 1 && BLOCK.test(n.tagName)) inName = false;
+        (inName ? nameNodes : bodyNodes).push(n);
+      });
+    }
+
+    var name = document.createElement('span');
+    name.className = 'task-name';
+    nameNodes.forEach(function (n) { name.appendChild(n); });
+
+    /* marked leaves a space after the input and, in loose lists, a trailing
+       newline. Trim both so the name sits flush in its card. */
+    if (name.firstChild && name.firstChild.nodeType === 3) {
+      name.firstChild.nodeValue = name.firstChild.nodeValue.replace(/^\s+/, '');
+    }
+    if (name.lastChild && name.lastChild.nodeType === 3) {
+      name.lastChild.nodeValue = name.lastChild.nodeValue.replace(/\s+$/, '');
+    }
+
+    var hasBody = bodyNodes.some(function (n) {
+      return n.nodeType === 1 || (n.nodeType === 3 && n.nodeValue.trim() !== '');
+    });
+
+    var card;
+    if (hasBody) {
+      card = document.createElement('details');
+      var summary = document.createElement('summary');
+      summary.appendChild(name);
+      card.appendChild(summary);
+      var wrap = document.createElement('div');
+      wrap.className = 'task-body';
+      bodyNodes.forEach(function (n) { wrap.appendChild(n); });
+      card.appendChild(wrap);
+    } else {
+      card = document.createElement('div');
+      card.appendChild(name);
+    }
+    card.className = 'task' + (done ? ' done' : '');
+    card.setAttribute('data-state', done ? 'done' : 'todo');
+    return card;
+  }
+
+  function buildTaskCards() {
+    /* `ol` as well as `ul`: a numbered task list is still a task list, and
+       leaving it out reproduces exactly the too-narrow-selector bug that made
+       this transform inert on loose lists. */
+    [].slice.call(host.querySelectorAll('ul, ol')).forEach(function (list) {
+      var children = [].slice.call(list.children);
+      var items = children.filter(function (li) { return parts(li); });
+      if (!items.length) return;
+
+      if (items.length === children.length) {
+        /* A pure task list -- the ## Tasks section -- becomes a stack of cards. */
+        var group = document.createElement('div');
+        group.className = 'tasks';
+        items.forEach(function (li) {
+          var card = buildCard(li);
+          if (card) group.appendChild(card);
+        });
+        list.replaceWith(group);
+      } else {
+        /* Mixed list: rewrite each task in place rather than hoisting the cards
+           above the list, which would reorder the reader's content. */
+        items.forEach(function (li) {
+          var card = buildCard(li);
+          if (!card) return;
+          li.replaceChildren(card);
+          li.className = 'task-item';
+        });
+      }
+    });
+  }
+  buildTaskCards();
+
+  /* Recast a task's sub-bullets as a field table. They are Label: value pairs --
+     Files:, Test first:, Verify: -- so a definition list is what they actually
+     are, and it lets the eye run down the labels instead of reading every bullet.
+     Bullets that are not label-value pairs stay as full-width rows, and a list
+     with no labelled items at all is left exactly as it was. */
+  function fieldifyTaskBodies() {
+    /* `:$` as well as `:\s`, so a label whose value is entirely a nested list --
+       "Files:" on its own line, paths beneath it -- is still recognised as a
+       field. Otherwise it became a full-width row, which also left the list
+       starting with a dd that had no dt. */
+    var LABEL = /^([A-Z][A-Za-z][A-Za-z ]{0,18}):(?:\s|$)/;
+
+    /* Pure: reports the label without touching the DOM. The leading text node
+       carries it, and in a loose sub-list marked wraps that in a <p>. */
+    function labelOf(li) {
+      var holder = li;
+      if (li.firstChild && li.firstChild.nodeType === 1 && li.firstChild.tagName === 'P') {
+        holder = li.firstChild;
+      }
+      var first = holder.firstChild;
+      var m = first && first.nodeType === 3 ? LABEL.exec(first.nodeValue) : null;
+      return m ? { holder: holder, first: first, match: m } : null;
+    }
+
+    [].slice.call(host.querySelectorAll('.task-body > ul, .task-body > ol')).forEach(function (list) {
+      var items = [].slice.call(list.children);
+      if (!items.length) return;
+
+      /* Decide before mutating. Building the table first and only then checking
+         whether to keep it moved every item's children into a table that got
+         thrown away -- silently emptying any body that had no labels at all. */
+      if (!items.some(labelOf)) return;
+
+      var dl = document.createElement('dl');
+      dl.className = 'fields';
+
+      items.forEach(function (li) {
+        var found = labelOf(li);
+
+        if (found) {
+          var holder = found.holder;
+          var first = found.first;
+          var m = found.match;
+          var dt = document.createElement('dt');
+          /* Keep the colon in the text rather than adding it via CSS, so copying a
+             task body out of the page yields "Files: x.ts:1" as written. */
+          dt.textContent = m[1] + ':';
+          first.nodeValue = first.nodeValue.slice(m[0].length);
+
+          var dd = document.createElement('dd');
+          /* Move the whole remaining item, not just the first child: a field may
+             carry a nested list or a code block, and dropping any of it would
+             delete content the plan author wrote. */
+          while (holder.firstChild) dd.appendChild(holder.firstChild);
+          if (holder !== li) {
+            holder.remove();
+            while (li.firstChild) dd.appendChild(li.firstChild);
+          }
+          dl.appendChild(dt);
+          dl.appendChild(dd);
+        } else {
+          var full = document.createElement('dd');
+          full.className = 'span';
+          while (li.firstChild) full.appendChild(li.firstChild);
+          dl.appendChild(full);
+        }
+      });
+
+      list.replaceWith(dl);
+    });
+  }
+  fieldifyTaskBodies();
+
+  /* --- location chips ---------------------------------------------------- */
+
+  /* Wrap file:line references so they read as addresses rather than prose.
+   *
+   * The walker must not descend into code, pre, or links: injecting markup inside
+   * a code sample would corrupt the very thing the reader is checking. `summary`
+   * is skipped too, deliberately -- a task name is the one line that should stay
+   * plain, and chipping inside it fights the scannability this view is for. */
+  /* Deliberately narrow. `.dev`, `.app` and `.test` are left out because
+     `Dockerfile.dev:3` and `server.test:12` are more plausible in a plan than the
+     same names as hosts with explicit ports. The residual trade is cosmetic in
+     both directions: a file literally named `foo.local` will not get a chip, and
+     a host like `redis.cache:6379` still will. */
+  var HOSTISH = /\.(?:com|net|org|io|local|internal|localhost)$/i;
+
+  /* `db.internal:5432` and `api.example.com:443` match the same shape as a file
+     reference. Reject host:port unless the match is clearly a path. */
+  function isLocation(s) {
+    var head = s.slice(0, s.lastIndexOf(':'));
+    return head.indexOf('/') !== -1 || !HOSTISH.test(head);
+  }
+
+  function chipLocations() {
+    var re = /(?:[\w.\-]+\/)*[\w.\-]*\.[A-Za-z][\w]*:\d+(?:[-–]\d+)?/g;
+    var walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        if (!node.nodeValue || node.nodeValue.indexOf(':') === -1) return NodeFilter.FILTER_REJECT;
+        /* `.task-name` as well as `summary`: a task with no sub-bullets has no
+           summary to be caught by, and its name should stay as plain as any
+           other task's. */
+        if (node.parentElement.closest('code, pre, a, summary, .task-name')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var targets = [];
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) targets.push(n);
+
+    targets.forEach(function (node) {
+      var text = node.nodeValue;
+      re.lastIndex = 0;
+      if (!re.test(text)) return;
+      re.lastIndex = 0;
+      var frag = document.createDocumentFragment();
+      var last = 0, match;
+      while ((match = re.exec(text)) !== null) {
+        if (!isLocation(match[0])) continue;
+        if (match.index > last) frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+        var chip = document.createElement('code');
+        chip.className = 'loc';
+        chip.textContent = match[0];
+        frag.appendChild(chip);
+        last = match.index + match[0].length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+  chipLocations();
+
+  /* --- wide tables ------------------------------------------------------- */
+
+  [].slice.call(host.querySelectorAll('table')).forEach(function (table) {
+    var scroller = document.createElement('div');
+    scroller.className = 'table-scroll';
+    table.parentNode.insertBefore(scroller, table);
+    scroller.appendChild(table);
+  });
+
+  /* --- section index ----------------------------------------------------- */
+
+  function slug(text, used) {
+    var base = text.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
+    var s = base, i = 2;
+    while (used[s]) s = base + '-' + i++;
+    used[s] = true;
+    return s;
+  }
+
+  /* Section headings only. A heading that ended up inside a task body -- whether
+     the author put it there or markdown produced one by accident -- would give the
+     index an entry whose target sits inside a collapsed disclosure, so clicking it
+     appears to do nothing. */
+  var headings = [].slice.call(host.querySelectorAll('h1, h2')).filter(function (h) {
+    return !h.parentNode.closest('.task-body');
+  });
+  var used = {};
+  var links = [];
+
+  var head = document.createElement('div');
+  head.className = 'nav-head';
+
+  /* Count the cards, not the checkboxes: buildTaskCards drops the <input>
+     elements when it rewrites each item, so counting inputs here would always
+     come back zero and the meter would never appear.
+   *
+     Only top-level cards count. A checkbox nested inside a task's sub-bullets is
+     a detail of that task, not a task of its own, and counting it would report a
+     total the reader cannot reconcile with the plan. */
+  var topCards = [].slice.call(host.querySelectorAll('.task')).filter(function (c) {
+    return !c.parentNode.closest('.task-body');
+  });
+  var total = topCards.length;
+  var done = topCards.filter(function (c) { return c.classList.contains('done'); }).length;
+
+  /* A bar is only worth drawing when it says something. At review time -- the
+     main reason this page exists -- nothing is done yet, so a 0% bar is noise;
+     and since the page is not re-rendered as work lands, a full bar mostly means
+     "this plan was rendered after the fact" rather than "you are finished". So
+     state the count plainly, and show the bar only while genuinely part-done. */
+  if (total) {
+    var count = document.createElement('p');
+    count.className = 'count';
+    if (done === 0) {
+      count.textContent = total + (total === 1 ? ' task' : ' tasks');
+    } else if (done < total) {
+      count.textContent = done + ' of ' + total + ' done';
+    } else {
+      count.textContent = total + (total === 1 ? ' task' : ' tasks') + ' · all done';
+    }
+    head.appendChild(count);
+
+    /* Only while part-done. At 0% it is noise and at 100% the text already says
+       it, so a bar on screen always means "this much of the way through". */
+    if (done > 0 && done < total) {
+      var meter = document.createElement('div');
+      meter.className = 'meter';
+      meter.setAttribute('role', 'progressbar');
+      meter.setAttribute('aria-valuemin', '0');
+      meter.setAttribute('aria-valuemax', String(total));
+      meter.setAttribute('aria-valuenow', String(done));
+      meter.setAttribute('aria-label', 'Tasks complete');
+      var fill = document.createElement('span');
+      fill.className = 'meter-fill';
+      fill.style.width = (done / total) * 100 + '%';
+      meter.appendChild(fill);
+      head.appendChild(meter);
+    }
+  }
+
+  var cards = host.querySelectorAll('details.task');
+  if (cards.length) {
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'detail-toggle';
+    toggle.setAttribute('aria-expanded', 'false');
+
+    var caret = document.createElement('span');
+    caret.className = 'caret';
+    var toggleLabel = document.createElement('span');
+
+    /* Name what actually expands. "Expand all detail" read as though it might
+       unfold the whole document. */
+    var open = false;
+    toggleLabel.textContent = 'Show all task details';
+    toggle.appendChild(caret);
+    toggle.appendChild(toggleLabel);
+
+    toggle.addEventListener('click', function () {
+      open = !open;
+      [].slice.call(host.querySelectorAll('details.task')).forEach(function (d) { d.open = open; });
+      toggleLabel.textContent = open ? 'Hide all task details' : 'Show all task details';
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+
+    /* The control belongs with what it acts on, not in the global index. Sit it on
+       the Tasks heading's own line where its scope is unambiguous; failing that,
+       put a bar directly above the cards.
+     *
+     * The anchor cannot just be the first `.tasks` group. A plan whose task list
+     * also holds plain bullets is rewritten in place, so no `.tasks` group exists
+     * at all -- and dereferencing that null threw, which killed every transform
+     * below this point: no index, no count, no toggle, no theme, no print
+     * handling. So fall back to the first card, and ignore anything nested inside
+     * another task's body, or the global control lands inside a collapsed
+     * disclosure it is meant to open. */
+    function topLevel(sel) {
+      return [].slice.call(host.querySelectorAll(sel)).filter(function (el) {
+        return !el.parentNode.closest('.task-body');
+      })[0] || null;
+    }
+
+    var anchor = topLevel('.tasks') || topLevel('.task');
+
+    if (anchor) {
+      /* Walk up to the block that sits directly in the plan body: an in-place card
+         is nested in an <li>, and its siblings are other list items, not the
+         section heading we are looking for. */
+      var block = anchor;
+      while (block.parentElement && block.parentElement !== host) block = block.parentElement;
+
+      /* h2 and below only. Wrapping the h1 steals the goal sentence out of
+         `h1 + p`, which is both the tab title and the lead paragraph's styling. */
+      var heading = null;
+      for (var prev = block.previousElementSibling; prev; prev = prev.previousElementSibling) {
+        if (/^H[2-6]$/.test(prev.tagName)) { heading = prev; break; }
+        if (/^H1$/.test(prev.tagName)) break;
+      }
+
+      if (heading) {
+        var sectionHead = document.createElement('div');
+        sectionHead.className = 'section-head';
+        heading.parentNode.insertBefore(sectionHead, heading);
+        /* The rule and spacing move to the wrapper, or the border would only span
+           the heading's own width instead of the full measure. */
+        heading.classList.add('inlined');
+        sectionHead.appendChild(heading);
+        sectionHead.appendChild(toggle);
+      } else {
+        var bar = document.createElement('div');
+        bar.className = 'tasks-bar';
+        block.parentNode.insertBefore(bar, block);
+        bar.appendChild(toggle);
+      }
+    }
+  }
+
+  /* Theme follows the OS by default. This only exists so a reader whose system is
+     dark can still read a long document on paper-white, or the reverse, without
+     changing their whole desktop. */
+  var THEMES = ['system', 'light', 'dark'];
+  var THEME_KEY = 'planit-theme';
+
+  function readTheme() {
+    try {
+      var v = window.localStorage.getItem(THEME_KEY);
+      return THEMES.indexOf(v) === -1 ? 'system' : v;
+    } catch (e) {
+      return 'system'; /* localStorage can be blocked for file:// origins */
+    }
+  }
+
+  function applyTheme(t) {
+    if (t === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', t);
+    try { window.localStorage.setItem(THEME_KEY, t); } catch (e) { /* not fatal */ }
+  }
+
+  var theme = readTheme();
+  applyTheme(theme);
+
+  var themeWrap = document.createElement('div');
+  themeWrap.className = 'nav-foot';
+
+  var seg = document.createElement('div');
+  seg.className = 'seg';
+  seg.setAttribute('role', 'group');
+  /* No visible heading: the control is deliberately quiet, so the group carries
+     its own accessible name instead of spending a line of the index on a label. */
+  seg.setAttribute('aria-label', 'Colour theme');
+
+  var segButtons = THEMES.map(function (name) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = name === 'system' ? 'Auto' : name.charAt(0).toUpperCase() + name.slice(1);
+    b.addEventListener('click', function () {
+      theme = name;
+      applyTheme(theme);
+      paintSeg();
+    });
+    seg.appendChild(b);
+    return { name: name, el: b };
+  });
+
+  function paintSeg() {
+    segButtons.forEach(function (b) {
+      b.el.setAttribute('aria-pressed', b.name === theme ? 'true' : 'false');
+    });
+  }
+  paintSeg();
+
+  themeWrap.appendChild(seg);
+
+  if (head.childNodes.length) toc.appendChild(head);
+
+  if (headings.length) {
+    var list = document.createElement('ul');
+    headings.forEach(function (h) {
+      h.id = h.id || slug(h.textContent, used);
+      var li = document.createElement('li');
+      li.className = 'lvl-' + h.tagName.toLowerCase();
+      var a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent;
+      li.appendChild(a);
+      list.appendChild(li);
+      links.push({ id: h.id, a: a });
+    });
+    toc.appendChild(list);
+  }
+
+  /* Last thing in the index, after the sections: set once, then ignored. */
+  toc.appendChild(themeWrap);
+
+  /* Highlight the section being read. */
+  if (links.length && 'IntersectionObserver' in window) {
+    var visible = {};
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting; });
+      var current = null;
+      for (var i = 0; i < links.length; i++) {
+        if (visible[links[i].id]) { current = links[i].id; break; }
+      }
+      links.forEach(function (l) {
+        l.a.classList.toggle('active', l.id === current);
+      });
+    }, { rootMargin: '0px 0px -70% 0px' });
+    headings.forEach(function (h) { observer.observe(h); });
+  }
+
+  /* --- printing ---------------------------------------------------------- */
+
+  /* Collapsed sub-bullets must appear on paper: a printout is read away from the
+     disclosure controls. CSS alone cannot reliably reveal a closed <details>, so
+     open them for the print and restore whatever the reader had open after. */
+  var restore = [];
+  window.addEventListener('beforeprint', function () {
+    restore = [].slice.call(host.querySelectorAll('details.task')).filter(function (d) {
+      return !d.open;
+    });
+    restore.forEach(function (d) { d.open = true; });
+  });
+  window.addEventListener('afterprint', function () {
+    restore.forEach(function (d) { d.open = false; });
+    restore = [];
+  });
+
+  /* Title the tab after the plan's goal so a pinned tab is identifiable. The h1
+     itself is no good: the plan format makes it the literal word "Goal", so every
+     plan would get the same title. The goal sentence is the paragraph under it. */
+  var h1 = host.querySelector('h1');
+  if (h1) {
+    var lead = h1.nextElementSibling;
+    var text = (lead && lead.tagName === 'P' ? lead.textContent : h1.textContent).trim();
+    if (text.length > 70) text = text.slice(0, 69).replace(/\s+\S*$/, '') + '…';
+    document.title = text + ' — Plan';
+  }
+});
+</script>
+</head>
+<body>
+<a class="skip" href="#plan">Skip to plan</a>
+<div class="layout">
+<nav id="toc" aria-label="Plan sections"></nav>
+<main id="plan"></main>
+</div>
+<script id="plan-src" type="text/plain" data-encoding="base64">
