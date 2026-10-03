@@ -273,3 +273,15 @@ test('two worktrees of one repo draw a shared PR once', async ($, on) => {
   expect((await ui.findAll({ key: 'open-7' })).length).toBe(1)
   await ui.unmount()
 })
+
+test('a merged PR keeps the pane up and shows its final state', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  world.graphql = { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main', { state: 'MERGED' })]) }
+  await clock.advance(60_000)
+  expect(world.panes).toEqual(['pr-status'])
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: 'merged' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 merged/ })).toBeDefined()
+  await ui.unmount()
+})
