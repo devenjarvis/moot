@@ -214,8 +214,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world.then = { exitCode: 0, stdout: reply([node(5, 'feat-base', 'main')]) }
     await start($, clock)
     const queries = graphqlCalls(world)
-    expect(queries.length).toBe(2)
+    expect(queries.length).toBe(3)
     expect(queries[1]!.includes('b0=feat-base')).toBe(true)
+    expect(queries[2]!.includes('c0=feat-base')).toBe(true)
 
     const ui = await $.ui.mount({ plugin: 'pr-status', surface, component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
     expect(await ui.find({ type: 'Text', text: 'Stack · 2 PRs → main' })).toBeDefined()
@@ -306,5 +307,24 @@ test('a problem below is drawn as inherited, apart from the PR own state', async
   expect(await ui.find({ type: 'Text', text: '↓ #101 checks failing' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'checks failing' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '✗ 1' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an inferred stack also finds PRs stacked above the tracked branch', async ($, on) => {
+  const first = JSON.stringify({
+    data: { repository: { b0: { nodes: [node(8, 'feat-a', 'feat-base')] }, c0: { nodes: [node(9, 'feat-top', 'feat-a')] } } },
+  })
+  const later = JSON.stringify({ data: { repository: { b0: { nodes: [node(5, 'feat-base', 'main')] }, c0: { nodes: [] } } } })
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: first })
+  world.then = { exitCode: 0, stdout: later }
+  await start($, clock)
+  const queries = graphqlCalls(world)
+  expect(queries[0]!.includes('c0=feat-a')).toBe(true)
+  expect(queries[1]!.includes('b0=feat-base')).toBe(true)
+  expect(queries[1]!.includes('c0=feat-top')).toBe(true)
+
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: 'Stack · 3 PRs → main' })).toBeDefined()
+  expect(await ui.find({ key: 'open-9' })).toBeDefined()
   await ui.unmount()
 })

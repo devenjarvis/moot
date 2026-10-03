@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Pr, PrGroup } from '../types'
-import { buildQuery, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
+import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
 
 type Node = Record<string, unknown>
 
@@ -94,12 +94,14 @@ const pr = (number: number, head: string, base: string, over: Partial<Pr> = {}):
 })
 
 test('buildQuery passes branch names as variables and drops stack fields on request', async () => {
-  const withStack = buildQuery(['feat-a', 'fe"at-b'], true)
+  const withStack = buildQuery(['feat-a', 'fe"at-b'], ['feat-a'], true)
   expect(withStack).toContain('$b0: String!')
   expect(withStack).toContain('b1: pullRequests(headRefName: $b1')
   expect(withStack).toContain('stackEntry')
   expect(withStack.includes('fe"at-b')).toBe(false)
-  expect(buildQuery(['feat-a'], false).includes('stack')).toBe(false)
+  expect(withStack).toContain('c0: pullRequests(baseRefName: $c0')
+  expect(withStack).toContain('$c0: String!')
+  expect(buildQuery(['feat-a'], [], false).includes('stack')).toBe(false)
 })
 
 test('parsePrs reads a native stack, drops fork PRs and counts checks', async () => {
@@ -218,6 +220,28 @@ test('an inferred stack still waits on the PR below', async () => {
   const groups = groupPrs([pr(7, 'top', 'bottom'), pr(5, 'bottom', 'main')])
   const group = groups[0]!
   expect(nextStep(group.prs[0]!, group)).toEqual({ label: 'blocked by #5', tone: 'warn' })
+})
+
+test('parsePrs keeps every open child PR based on a branch', async () => {
+  const json = {
+    data: {
+      repository: {
+        b0: { nodes: [core(8, 'feat-a', 'main')] },
+        c0: { nodes: [core(9, 'feat-b', 'feat-a'), core(10, 'feat-c', 'feat-a'), core(11, 'x', 'feat-a', { headRepository: { nameWithOwner: 'fork/r' } })] },
+      },
+    },
+  }
+  expect(parsePrs(json, 'o/r', ['o/r']).map(one => one.number)).toEqual([8, 9, 10])
+})
+
+test('childBranches asks for the heads of open inferred PRs not asked yet', async () => {
+  const prs = [
+    pr(7, 'top', 'mid'),
+    pr(5, 'mid', 'main'),
+    pr(4, 'old', 'main', { state: 'MERGED' }),
+    pr(3, 'native', 'main', { stack: { number: 1, size: 1, base: 'main', position: 1 } }),
+  ]
+  expect(childBranches(prs, new Set(['mid']))).toEqual(['top'])
 })
 
 test('parentBranches asks for bases that are not fetched and not the default', async () => {

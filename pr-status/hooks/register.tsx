@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Pr, PrGroup, Snapshot, Tone, TrackedBranch } from '../types'
-import { buildQuery, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
+import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
 
 const PANE = 'pr-status'
 const TITLE = 'Pull requests'
@@ -15,7 +15,7 @@ const dismissed = atom({ plugin: 'pr-status', key: 'dismissed' } as const, false
 const ACTIVE_MS = 60_000
 const IDLE_MS = 180_000
 const AFTER_COMMAND_MS = 5_000
-const PARENT_ROUNDS = 5
+const STACK_ROUNDS = 5
 const TRIGGER = /\bgh\s+(pr|stack)\b|\bgit\s+push\b/
 
 const ACCENT = '#a78bfa'
@@ -101,7 +101,7 @@ async function repoInfo($: EngineInterface, root: string): Promise<RepoInfo> {
   return info
 }
 
-async function query($: EngineInterface, root: string, info: RepoInfo, wanted: string[]): Promise<Pr[]> {
+async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]): Promise<Pr[]> {
   const withStack = stackFields.get(root) ?? true
   const [owner = '', name = ''] = info.repo.split('/')
   const argv = [
@@ -109,12 +109,13 @@ async function query($: EngineInterface, root: string, info: RepoInfo, wanted: s
     'api',
     'graphql',
     '-f',
-    `query=${buildQuery(wanted, withStack)}`,
+    `query=${buildQuery(heads, bases, withStack)}`,
     '-f',
     `owner=${owner}`,
     '-f',
     `name=${name}`,
-    ...wanted.flatMap((branch, i) => ['-f', `b${i}=${branch}`]),
+    ...heads.flatMap((branch, i) => ['-f', `b${i}=${branch}`]),
+    ...bases.flatMap((branch, i) => ['-f', `c${i}=${branch}`]),
   ]
   const res = await run($, argv, root, 20_000)
   if (!res) throw new Error('gh is not installed')
@@ -122,7 +123,7 @@ async function query($: EngineInterface, root: string, info: RepoInfo, wanted: s
     const message = `${res.stderr}\n${res.stdout}`
     if (withStack && /Field '(?:stack|stackEntry)'/.test(message)) {
       stackFields.set(root, false)
-      return query($, root, info, wanted)
+      return query($, root, info, heads, bases)
     }
     throw new Error(firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed')
   }
@@ -131,16 +132,20 @@ async function query($: EngineInterface, root: string, info: RepoInfo, wanted: s
 
 async function fetchRoot($: EngineInterface, root: string, names: string[]) {
   const info = await repoInfo($, root)
-  const asked = new Set<string>()
+  const askedHeads = new Set<string>()
+  const askedBases = new Set<string>()
   const prs: Pr[] = []
-  let wanted = names.filter(name => name !== info.defaultBranch)
-  for (let round = 0; round <= PARENT_ROUNDS && wanted.length > 0; round++) {
-    wanted.forEach(name => asked.add(name))
-    for (const pr of await query($, root, info, wanted)) {
-      const isParent = round > 0
-      if ((!isParent || pr.state === 'OPEN') && !prs.some(one => one.number === pr.number)) prs.push(pr)
+  let heads = names.filter(name => name !== info.defaultBranch)
+  let bases = heads
+  for (let round = 0; round <= STACK_ROUNDS && heads.length + bases.length > 0; round++) {
+    heads.forEach(name => askedHeads.add(name))
+    bases.forEach(name => askedBases.add(name))
+    for (const pr of await query($, root, info, heads, bases)) {
+      const isFound = round > 0 || !heads.includes(pr.head)
+      if ((!isFound || pr.state === 'OPEN') && !prs.some(one => one.number === pr.number)) prs.push(pr)
     }
-    wanted = parentBranches(prs, info.defaultBranch).filter(name => !asked.has(name))
+    heads = parentBranches(prs, info.defaultBranch).filter(name => !askedHeads.has(name))
+    bases = childBranches(prs, askedBases)
   }
   return { repo: info.repo, prs }
 }
