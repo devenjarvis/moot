@@ -379,7 +379,9 @@ export const register: Register = on => {
                 </Box>
               )}
               {step.isInherited ? (
-                <Text color={MUTED}>{stepLabel}</Text>
+                <Text color={TONES[step.tone]} dimColor>
+                  {stepLabel}
+                </Text>
               ) : (
                 <Text color={TONES[step.tone]} bold>
                   {stepLabel}
