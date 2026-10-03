@@ -97,6 +97,19 @@ A Claude Code mod (a plugin of function hooks) that replaces the built-in plan a
 
 Approving skips the permission step, so Claude Code picks the mode that follows plan mode; the pane cannot choose it.
 
+### `pr-status`
+
+A mod that shows the GitHub PRs of the session's branches in a pane. The pane opens by itself the first time one of those branches has an open PR, and never before. Opened this way, it seats only on a terminal at least 144 columns wide; `/prs` opens it at any width.
+
+- **Branches** it tracks: the branch checked out in the session's directory at start, and after every Bash command, `EnterWorktree` and directory change. It skips the default branch and a detached HEAD.
+- **Stacks:** a PR in a [GitHub stack](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) is drawn with the whole stack, top first, down to the base branch, including PRs whose branches the session never checked out. Without a native stack, PRs whose base is another PR's head are drawn as one stack too.
+- **Each PR** shows its number and title, a check count (`✓` passed, `✗` failed, `◷` running), the review decision, unresolved review threads, the size of the change, and `HEAD` on the branch you are on. On the right is the next thing it needs: `blocked by #N` (an open PR below it in the stack), `conflicts`, `checks failing`, `changes requested`, `checks pending`, `review needed`, `behind base`, or `ready to merge`.
+- **Act:** `r` refreshes; pressing a PR's title opens it in the browser.
+
+It polls every 60 s while a PR is open and every 3 min otherwise, and 5 s after Claude runs `gh pr`, `gh stack` or `git push`. When every PR has merged or closed, the pane stays and shows the final state. If you close it, it stays closed until a new PR opens.
+
+It needs [`gh`](https://cli.github.com), signed in. Without it, or outside a GitHub repo, the mod shows nothing.
+
 ## Installation
 
 Clone the repo and add the skill directories to your Claude Code configuration:
@@ -107,19 +120,19 @@ git clone https://github.com/devenjarvis/moot.git
 
 Then register the skills in your Claude Code project or user settings. See the [Claude Code custom skills documentation](https://docs.anthropic.com/en/docs/claude-code/skills) for details on configuring custom skill directories.
 
-To load the `plan-review` mod in every session, point `CLAUDE_CODE_PLUGIN_DIRS` at its folder in the `env` block of `~/.claude/settings.json` (use the path of your clone):
+To load the mods in every session, point `CLAUDE_CODE_PLUGIN_DIRS` at their folders in the `env` block of `~/.claude/settings.json` (use the path of your clone):
 
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/moot/plan-review"
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/moot/plan-review:~/Code/moot/pr-status"
   }
 }
 ```
 
 Separate several folders with `:` (`;` on Windows). To try it for one session only, run `claude --plugin-dir ~/Code/moot/plan-review`. A `git pull` updates it.
 
-Check it with `claude plugin validate plan-review` and `claude plugin test plan-review`.
+Check a mod with `claude plugin validate <folder>` and `claude plugin test <folder>`.
 
 ## Project Structure
 
@@ -152,6 +165,16 @@ moot/
       register.tsx           # Hooks and the review pane
       plan.ts                # Plan parsing, block splitting, feedback text
       plan-review.test.tsx   # Tests for `claude plugin test`
+    types/index.d.ts         # The mod's $.state contract
+    tsconfig.json            # Extends the types Claude Code writes on load
+  pr-status/
+    .claude-plugin/plugin.json  # Mod manifest
+    hooks/
+      hooks.json             # Names the hooks module
+      register.tsx           # Branch tracking, polling, and the PR pane
+      github.ts              # GraphQL query, parsing, stack grouping, next step
+      github.test.ts         # Tests for the pure GitHub logic
+      pr-status.test.tsx     # Tests for the hooks and the pane
     types/index.d.ts         # The mod's $.state contract
     tsconfig.json            # Extends the types Claude Code writes on load
 ```
