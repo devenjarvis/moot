@@ -85,6 +85,18 @@ The gate between a finished implementation and a merged PR: validate → fix →
 4. **PR** — commits, pushes, and opens a draft PR, filling in the repo's PR template if it has one
 5. **CI** — polls checks, diagnoses failures, pushes fixes, and repeats until green, then marks the PR ready for review
 
+## Mods
+
+### `plan-review`
+
+A Claude Code mod (a plugin of function hooks) that replaces the built-in plan approval dialog with a review pane. When Claude calls `ExitPlanMode`, the pane opens on the plan's first section, and the built-in dialog does not show.
+
+- **Read** the plan section by section with **← Prev** / **Next →**, as an outline (`o`), or in full (`f`). Tables draw as aligned columns, and list items are spaced apart.
+- **Note** any section, or the plan as a whole. Notes save as you type.
+- **Decide:** **1** approves, **2** sends your notes back to Claude as the `ExitPlanMode` error and keeps plan mode on, **3** (or Esc) falls back to the built-in dialog. Approving with unsent notes asks first. Pressing **2** with no notes opens a feedback box.
+
+Approving skips the permission step, so Claude Code picks the mode that follows plan mode; the pane cannot choose it.
+
 ## Installation
 
 Clone the repo and add the skill directories to your Claude Code configuration:
@@ -94,6 +106,20 @@ git clone https://github.com/devenjarvis/moot.git
 ```
 
 Then register the skills in your Claude Code project or user settings. See the [Claude Code custom skills documentation](https://docs.anthropic.com/en/docs/claude-code/skills) for details on configuring custom skill directories.
+
+To load the `plan-review` mod in every session, point `CLAUDE_CODE_PLUGIN_DIRS` at its folder in the `env` block of `~/.claude/settings.json` (use the path of your clone):
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/moot/plan-review"
+  }
+}
+```
+
+Separate several folders with `:` (`;` on Windows). To try it for one session only, run `claude --plugin-dir ~/Code/moot/plan-review`. A `git pull` updates it.
+
+Check it with `claude plugin validate plan-review` and `claude plugin test plan-review`.
 
 ## Project Structure
 
@@ -119,6 +145,15 @@ moot/
     implementer-prompt.md  # Template for subagent dispatch
   ship-it/
     SKILL.md          # Ship-it skill definition (validate + PR + CI)
+  plan-review/
+    .claude-plugin/plugin.json  # Mod manifest
+    hooks/
+      hooks.json             # Names the hooks module
+      register.tsx           # Hooks and the review pane
+      plan.ts                # Plan parsing, block splitting, feedback text
+      plan-review.test.tsx   # Tests for `claude plugin test`
+    types/index.d.ts         # The mod's $.state contract
+    tsconfig.json            # Extends the types Claude Code writes on load
 ```
 
 ## License

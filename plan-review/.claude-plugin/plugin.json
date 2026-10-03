@@ -1,0 +1,7 @@
+{
+  "name": "plan-review",
+  "version": "0.1.0",
+  "description": "Review a plan in a pane before plan mode ends: read it section by section, leave notes, then approve or send changes back",
+  "author": { "name": "Deven Jarvis" },
+  "types": "./types/index.d.ts"
+}
