@@ -50,6 +50,7 @@ const STACK = {
 const reply = (nodes: Node[]) => JSON.stringify({ data: { repository: { b0: { nodes } } } })
 
 type World = {
+  root: string
   branch: string
   graphql: { exitCode: number; stdout: string; stderr?: string }
   then?: World['graphql']
@@ -59,7 +60,7 @@ type World = {
 }
 
 function setup($: Engine, on: On, graphql: World['graphql'] = { exitCode: 0, stdout: reply([]) }) {
-  const world: World = { branch: 'feat-a', graphql, calls: [], opens: [], panes: [] }
+  const world: World = { root: '/repo', branch: 'feat-a', graphql, calls: [], opens: [], panes: [] }
   const clock = mock.clock(on)
   const out = (stdout: string, exitCode = 0, stderr = '') => ({
     value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
@@ -68,7 +69,7 @@ function setup($: Engine, on: On, graphql: World['graphql'] = { exitCode: 0, std
     const argv = [...e.argv]
     world.calls.push(argv)
     const line = argv.join(' ')
-    if (line.startsWith('git rev-parse')) return out(`/repo\n${world.branch}\n`)
+    if (line.startsWith('git rev-parse')) return out(`${world.root}\n${world.branch}\n`)
     if (line.startsWith('git symbolic-ref')) return out('origin/main\n')
     if (line.startsWith('git remote get-url')) return out('git@github.com:o/r.git\n')
     if (line.startsWith('gh repo view')) return out('{"nameWithOwner":"o/r","defaultBranchRef":{"name":"main"}}')
@@ -260,3 +261,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+test('two worktrees of one repo draw a shared PR once', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  world.root = '/worktree'
+  world.branch = 'feat-b'
+  await $.tool.call({ tool: 'EnterWorktree', name: 'b' } as never)
+  await clock.advance(5_000)
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect((await ui.findAll({ key: 'open-7' })).length).toBe(1)
+  await ui.unmount()
+})

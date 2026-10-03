@@ -172,26 +172,27 @@ async function refreshNow($: EngineInterface) {
   for (const one of tracked) roots.set(one.root, [...(roots.get(one.root) ?? []), one.branch])
 
   const previous = await read($, snapshot)
-  const prs: Pr[] = []
+  const prs = new Map<string, Pr>()
+  const kept: Pr[] = []
   const repos: Record<string, string> = { ...previous?.repos }
   let error: string | null = null
   let fetched = 0
   for (const [root, names] of roots) {
     try {
       const found = await fetchRoot($, root, names)
-      prs.push(...found.prs)
+      for (const pr of found.prs) prs.set(keyOf(pr), pr)
       repos[root] = found.repo
       fetched++
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
       const failedRepo = repoInfos.get(root)?.repo ?? repos[root]
-      const kept = previous?.groups.flatMap(group => group.prs).filter(pr => pr.repo === failedRepo) ?? []
-      prs.push(...kept.filter(pr => !prs.some(one => one.repo === pr.repo && one.number === pr.number)))
+      kept.push(...(previous?.groups.flatMap(group => group.prs).filter(pr => pr.repo === failedRepo) ?? []))
     }
   }
+  for (const pr of kept) if (!prs.has(keyOf(pr))) prs.set(keyOf(pr), pr)
 
   const next: Snapshot = {
-    groups: groupPrs(prs),
+    groups: groupPrs([...prs.values()]),
     error,
     fetchedAt: fetched > 0 ? await $.clock.now() : (previous?.fetchedAt ?? 0),
     repos,
