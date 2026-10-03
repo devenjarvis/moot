@@ -178,7 +178,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const ui = await $.ui.mount({ plugin: 'pr-status', surface, component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
     expect(await ui.find({ type: 'Text', text: /Stack #4 · 3 PRs → main/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'blocked by #101' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'ready · with #101' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /HEAD/ })).toBeDefined()
     const rows = ['open-103', 'open-102', 'open-101']
     for (const key of rows) expect(await ui.find({ key })).toBeDefined()

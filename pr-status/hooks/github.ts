@@ -193,19 +193,45 @@ function below(pr: Pr, group: PrGroup): Pr[] {
   }
 }
 
+function blockingStep(pr: Pr): NextStep | null {
+  if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return { label: 'conflicts', tone: 'bad' }
+  if (pr.checks.fail > 0) return { label: 'checks failing', tone: 'bad' }
+  if (pr.review === 'CHANGES_REQUESTED') return { label: 'changes requested', tone: 'bad' }
+  return null
+}
+
+function waitingStep(pr: Pr): NextStep | null {
+  if (pr.checks.pending > 0) return { label: 'checks pending', tone: 'warn' }
+  if (pr.review === 'REVIEW_REQUIRED') return { label: 'review needed', tone: 'warn' }
+  if (pr.mergeState === 'BEHIND') return { label: 'behind base', tone: 'warn' }
+  return null
+}
+
 export function nextStep(pr: Pr, group: PrGroup): NextStep {
   if (pr.state === 'MERGED') return { label: 'merged', tone: 'merged' }
   if (pr.state === 'CLOSED') return { label: 'closed', tone: 'muted' }
   if (pr.isDraft) return { label: 'draft', tone: 'muted' }
-  const blocker = below(pr, group).find(one => one.state === 'OPEN')
-  if (blocker) return { label: `blocked by #${blocker.number}`, tone: 'warn' }
-  if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return { label: 'conflicts', tone: 'bad' }
-  if (pr.checks.fail > 0) return { label: 'checks failing', tone: 'bad' }
-  if (pr.review === 'CHANGES_REQUESTED') return { label: 'changes requested', tone: 'bad' }
-  if (pr.checks.pending > 0) return { label: 'checks pending', tone: 'warn' }
-  if (pr.review === 'REVIEW_REQUIRED') return { label: 'review needed', tone: 'warn' }
-  if (pr.mergeState === 'BEHIND') return { label: 'behind base', tone: 'warn' }
-  return { label: 'ready to merge', tone: 'good' }
+  const lower = below(pr, group).filter(one => one.state === 'OPEN')
+
+  if (!pr.stack) {
+    if (lower[0]) return { label: `blocked by #${lower[0].number}`, tone: 'warn' }
+    return blockingStep(pr) ?? waitingStep(pr) ?? { label: 'ready to merge', tone: 'good' }
+  }
+
+  // Merging a PR in a native stack merges every open PR below it, so their problems are this PR's too.
+  const own = blockingStep(pr)
+  if (own) return own
+  for (const one of [...lower].reverse()) {
+    if (one.isDraft) return { label: `#${one.number}: draft`, tone: 'warn' }
+    const step = blockingStep(one) ?? waitingStep(one)
+    if (step) return { label: `#${one.number}: ${step.label}`, tone: step.tone }
+  }
+  const waiting = waitingStep(pr)
+  if (waiting) return waiting
+  const bottom = lower.at(-1)
+  if (!bottom) return { label: 'ready to merge', tone: 'good' }
+  const label = lower.length === 1 ? `ready · with #${bottom.number}` : `ready · merges #${bottom.number}–#${pr.number}`
+  return { label, tone: 'good' }
 }
 
 export function parentBranches(prs: Pr[], defaultBranch: string): string[] {

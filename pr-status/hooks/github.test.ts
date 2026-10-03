@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Pr } from '../types'
+import type { Pr, PrGroup } from '../types'
 import { buildQuery, groupPrs, nextStep, parentBranches, parsePrs } from './github'
 
 type Node = Record<string, unknown>
@@ -145,7 +145,7 @@ test('nextStep follows the precedence', async () => {
   const [top, mid, bottom] = group.prs
   expect(nextStep(bottom!, group).label).toBe('merged')
   expect(nextStep(mid!, group).label).toBe('checks failing')
-  expect(nextStep(top!, group)).toEqual({ label: 'blocked by #102', tone: 'warn' })
+  expect(nextStep(top!, group)).toEqual({ label: '#102: checks failing', tone: 'bad' })
 
   const lone = (over: Partial<Pr>) => {
     const one = pr(1, 'a', 'main', over)
@@ -160,6 +160,51 @@ test('nextStep follows the precedence', async () => {
   expect(lone({ checks: { pass: 1, fail: 0, pending: 2 } })).toBe('checks pending')
   expect(lone({ review: 'REVIEW_REQUIRED' })).toBe('review needed')
   expect(lone({ mergeState: 'BEHIND' })).toBe('behind base')
+})
+
+const stacked = (number: number, position: number, size: number, over: Partial<Pr> = {}) =>
+  pr(number, `s${position}`, position === 1 ? 'main' : `s${position - 1}`, {
+    stack: { number: 9, size, base: 'main', position },
+    ...over,
+  })
+
+const nativeGroup = (prs: Pr[]): PrGroup => ({ key: 'k', repo: 'o/r', stack: 9, base: 'main', size: prs.length, prs })
+
+test('in a native stack a clean PR merges the open PRs below it', async () => {
+  const two = nativeGroup([stacked(20, 2, 2), stacked(19, 1, 2)])
+  expect(nextStep(two.prs[0]!, two)).toEqual({ label: 'ready · with #19', tone: 'good' })
+  expect(nextStep(two.prs[1]!, two)).toEqual({ label: 'ready to merge', tone: 'good' })
+
+  const three = nativeGroup([stacked(21, 3, 3), stacked(20, 2, 3), stacked(19, 1, 3)])
+  expect(nextStep(three.prs[0]!, three).label).toBe('ready · merges #19–#21')
+
+  const landed = nativeGroup([stacked(21, 3, 3), stacked(20, 2, 3), stacked(19, 1, 3, { state: 'MERGED' })])
+  expect(nextStep(landed.prs[0]!, landed).label).toBe('ready · with #20')
+})
+
+test('in a native stack the lowest problem below is named, after the PR own blocking problems', async () => {
+  const group = nativeGroup([
+    stacked(21, 3, 3),
+    stacked(20, 2, 3, { checks: { pass: 1, fail: 0, pending: 1 } }),
+    stacked(19, 1, 3, { review: 'REVIEW_REQUIRED' }),
+  ])
+  expect(nextStep(group.prs[0]!, group)).toEqual({ label: '#19: review needed', tone: 'warn' })
+  expect(nextStep(group.prs[1]!, group)).toEqual({ label: '#19: review needed', tone: 'warn' })
+
+  const draftBelow = nativeGroup([stacked(20, 2, 2), stacked(19, 1, 2, { isDraft: true })])
+  expect(nextStep(draftBelow.prs[0]!, draftBelow)).toEqual({ label: '#19: draft', tone: 'warn' })
+
+  const ownConflict = nativeGroup([stacked(20, 2, 2, { mergeable: 'CONFLICTING' }), stacked(19, 1, 2, { review: 'REVIEW_REQUIRED' })])
+  expect(nextStep(ownConflict.prs[0]!, ownConflict).label).toBe('conflicts')
+
+  const ownPending = nativeGroup([stacked(20, 2, 2, { review: 'REVIEW_REQUIRED' }), stacked(19, 1, 2)])
+  expect(nextStep(ownPending.prs[0]!, ownPending).label).toBe('review needed')
+})
+
+test('an inferred stack still waits on the PR below', async () => {
+  const groups = groupPrs([pr(7, 'top', 'bottom'), pr(5, 'bottom', 'main')])
+  const group = groups[0]!
+  expect(nextStep(group.prs[0]!, group)).toEqual({ label: 'blocked by #5', tone: 'warn' })
 })
 
 test('parentBranches asks for bases that are not fetched and not the default', async () => {
