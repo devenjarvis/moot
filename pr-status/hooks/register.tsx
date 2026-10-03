@@ -284,7 +284,10 @@ export const register: Register = on => {
   })
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
-    if (e.origin.kind === 'person') await update($, dismissed, () => true)
+    if (e.origin.kind === 'person') {
+      await update($, dismissed, () => true)
+      $.ui.toast('PR pane closed. Run /prs to bring it back.', { timeoutMs: 8_000 })
+    }
     return next(e)
   })
 
