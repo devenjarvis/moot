@@ -1,4 +1,4 @@
-import type { Checks, NextStep, Pr, PrGroup, PrState, Review, StackEntry } from '../types'
+import type { Checks, NextStep, Pr, PrGroup, PrState, Review, StackEntry, Tone } from '../types'
 
 const CORE = `fragment Core on PullRequest {
   number title url state isDraft headRefName baseRefName
@@ -207,6 +207,12 @@ function waitingStep(pr: Pr): NextStep | null {
   return null
 }
 
+export function ownTone(pr: Pr): Tone {
+  if (pr.state === 'MERGED') return 'merged'
+  if (pr.state === 'CLOSED' || pr.isDraft) return 'muted'
+  return (blockingStep(pr) ?? waitingStep(pr))?.tone ?? 'good'
+}
+
 export function nextStep(pr: Pr, group: PrGroup): NextStep {
   if (pr.state === 'MERGED') return { label: 'merged', tone: 'merged' }
   if (pr.state === 'CLOSED') return { label: 'closed', tone: 'muted' }
@@ -222,9 +228,9 @@ export function nextStep(pr: Pr, group: PrGroup): NextStep {
   const own = blockingStep(pr)
   if (own) return own
   for (const one of [...lower].reverse()) {
-    if (one.isDraft) return { label: `#${one.number}: draft`, tone: 'warn' }
+    if (one.isDraft) return { label: `#${one.number} draft`, tone: 'warn', isInherited: true }
     const step = blockingStep(one) ?? waitingStep(one)
-    if (step) return { label: `#${one.number}: ${step.label}`, tone: step.tone }
+    if (step) return { label: `#${one.number} ${step.label}`, tone: step.tone, isInherited: true }
   }
   const waiting = waitingStep(pr)
   if (waiting) return waiting

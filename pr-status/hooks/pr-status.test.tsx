@@ -285,3 +285,26 @@ test('a merged PR keeps the pane up and shows its final state', async ($, on) =>
   expect(await ui.find({ type: 'Text', text: /1 merged/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('a problem below is drawn as inherited, apart from the PR own state', async ($, on) => {
+  const failing = { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: 'StatusContext', state: 'FAILURE' }] } } } }] }
+  const stack = {
+    ...STACK,
+    size: 2,
+    entries: {
+      nodes: [
+        { position: 1, pullRequest: node(101, 'feat-1', 'main', { commits: failing }) },
+        { position: 2, pullRequest: node(102, 'feat-2', 'feat-1') },
+      ],
+    },
+  }
+  const { world, clock } = setup($, on)
+  world.branch = 'feat-2'
+  world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack, stackEntry: { position: 2 } })]) }
+  await start($, clock)
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: '↓ #101 checks failing' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'checks failing' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '✗ 1' })).toBeDefined()
+  await ui.unmount()
+})

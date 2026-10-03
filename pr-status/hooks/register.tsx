@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Pr, PrGroup, Snapshot, Tone, TrackedBranch } from '../types'
-import { buildQuery, groupPrs, nextStep, parentBranches, parsePrs } from './github'
+import { buildQuery, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
 
 const PANE = 'pr-status'
 const TITLE = 'Pull requests'
@@ -230,12 +230,6 @@ function clip(text: string, room: number): string {
   return text.length <= room ? text : `${text.slice(0, Math.max(1, room - 1))}…`
 }
 
-function checksText(pr: Pr): string {
-  const { pass, fail, pending } = pr.checks
-  if (pass + fail + pending === 0) return 'no checks'
-  return `✓${pass} ✗${fail} ◷${pending}`
-}
-
 const REVIEW_TEXT: Record<string, string> = {
   APPROVED: 'approved',
   CHANGES_REQUESTED: 'changes requested',
@@ -344,11 +338,18 @@ export const register: Register = on => {
 
     const row = (pr: Pr, group: PrGroup, isStack: boolean) => {
       const step = nextStep(pr, group)
+      const stepLabel = step.isInherited ? `↓ ${step.label}` : step.label
       const isHead = here !== null && snap.repos[here.root] === pr.repo && here.branch === pr.head
-      const room = width - step.label.length - (isHead ? 10 : 5)
+      const room = width - stepLabel.length - (isHead ? 10 : 5)
+      const rail = isStack ? '│' : ' '
+      const { pass, fail, pending } = pr.checks
+      const hasChecks = pass + fail + pending > 0
+      const count = (key: string, mark: string, n: number, tone: Tone) => (
+        <Text key={key} color={n > 0 ? TONES[tone] : MUTED} dimColor={n === 0}>
+          {`${mark} ${n}`}
+        </Text>
+      )
       const details = [
-        stateText(pr),
-        checksText(pr),
         pr.review ? REVIEW_TEXT[pr.review] : '',
         pr.unresolved > 0 ? `${pr.unresolved} unresolved` : '',
         `+${pr.additions} −${pr.deletions}`,
@@ -361,7 +362,7 @@ export const register: Register = on => {
         <Box key={`row-${keyOf(pr)}`} flexDirection="column">
           <Box justifyContent="space-between">
             <Box>
-              <Text color={TONES[step.tone]}>{`${isStack ? '│' : ' '}${glyph(pr)} `}</Text>
+              <Text color={TONES[ownTone(pr)]}>{`${rail}${glyph(pr)} `}</Text>
               <Button
                 key={openKey(pr)}
                 plain
@@ -377,12 +378,32 @@ export const register: Register = on => {
                   </Text>
                 </Box>
               )}
-              <Text color={TONES[step.tone]} bold>
-                {step.label}
-              </Text>
+              {step.isInherited ? (
+                <Text color={MUTED}>{stepLabel}</Text>
+              ) : (
+                <Text color={TONES[step.tone]} bold>
+                  {stepLabel}
+                </Text>
+              )}
             </Box>
           </Box>
-          <Text color={MUTED} wrap="truncate-end">{`${isStack ? '│' : ' '}  ${details}`}</Text>
+          <Box gap={2}>
+            <Text color={MUTED}>{`${rail}  ${stateText(pr)}`}</Text>
+            {hasChecks ? (
+              <Box gap={2}>
+                {count('pass', '✓', pass, 'good')}
+                {count('fail', '✗', fail, 'bad')}
+                {count('pending', '◷', pending, 'warn')}
+              </Box>
+            ) : (
+              <Text color={MUTED}>no checks</Text>
+            )}
+            {details && (
+              <Text color={MUTED} wrap="truncate-end">
+                {details}
+              </Text>
+            )}
+          </Box>
         </Box>
       )
     }
