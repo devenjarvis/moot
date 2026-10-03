@@ -1,0 +1,7 @@
+{
+  "name": "pr-status",
+  "version": "0.1.0",
+  "description": "Show the GitHub PRs of this session's branches in a pane, grouped by stack, once one is open",
+  "author": { "name": "Deven Jarvis" },
+  "types": "./types/index.d.ts"
+}
