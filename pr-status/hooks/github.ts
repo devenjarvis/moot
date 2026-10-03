@@ -1,4 +1,4 @@
-import type { Checks, NextStep, Pr, PrGroup, PrState, Review, StackEntry } from '../types'
+import type { Checks, NextStep, Pr, PrGroup, PrState, Review, StackEntry, Tone } from '../types'
 
 const CORE = `fragment Core on PullRequest {
   number title url state isDraft headRefName baseRefName
@@ -20,14 +20,15 @@ const TOP_WITH_STACK = `fragment Top on PullRequest {
 
 const TOP_PLAIN = `fragment Top on PullRequest { ...Core }`
 
-export function buildQuery(branches: string[], withStack: boolean): string {
-  const vars = branches.map((_, i) => `$b${i}: String!`).join(', ')
-  const fields = branches
-    .map(
+export function buildQuery(heads: string[], bases: string[], withStack: boolean): string {
+  const vars = [...heads.map((_, i) => `$b${i}: String!`), ...bases.map((_, i) => `$c${i}: String!`)].join(', ')
+  const fields = [
+    ...heads.map(
       (_, i) =>
         `    b${i}: pullRequests(headRefName: $b${i}, first: 5, states: [OPEN, MERGED, CLOSED], orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ...Top } }`,
-    )
-    .join('\n')
+    ),
+    ...bases.map((_, i) => `    c${i}: pullRequests(baseRefName: $c${i}, first: 10, states: [OPEN]) { nodes { ...Top } }`),
+  ].join('\n')
   return `query($owner: String!, $name: String!, ${vars}) {
   repository(owner: $owner, name: $name) {
 ${fields}
@@ -87,22 +88,29 @@ export function parsePrs(json: unknown, repo: string, allowedHeadRepos: string[]
   const byNumber = new Map<number, Pr>()
   const allowed = (node: Raw) => allowedHeadRepos.includes(node.headRepository?.nameWithOwner)
 
-  for (const connection of Object.values(repository) as Raw[]) {
-    const nodes: Raw[] = (connection?.nodes ?? []).filter(allowed)
-    const chosen = [...nodes].sort((a, b) => STATE_RANK[a.state as PrState] - STATE_RANK[b.state as PrState])[0]
-    if (!chosen) continue
-    const stack = chosen.stack as Raw | null | undefined
+  const add = (node: Raw) => {
+    const stack = node.stack as Raw | null | undefined
     if (!stack) {
-      byNumber.set(chosen.number, toPr(chosen, repo, null))
-      continue
+      byNumber.set(node.number, toPr(node, repo, null))
+      return
     }
     for (const entry of stack.entries?.nodes ?? []) {
       if (!entry?.pullRequest) continue
       const info = { number: stack.number, size: stack.size, base: stack.baseRefName, position: entry.position }
       byNumber.set(entry.pullRequest.number, toPr(entry.pullRequest, repo, info))
     }
-    const position = chosen.stackEntry?.position ?? byNumber.get(chosen.number)?.stack?.position ?? 0
-    byNumber.set(chosen.number, toPr(chosen, repo, { number: stack.number, size: stack.size, base: stack.baseRefName, position }))
+    const position = node.stackEntry?.position ?? byNumber.get(node.number)?.stack?.position ?? 0
+    byNumber.set(node.number, toPr(node, repo, { number: stack.number, size: stack.size, base: stack.baseRefName, position }))
+  }
+
+  for (const [alias, connection] of Object.entries(repository) as [string, Raw][]) {
+    const nodes: Raw[] = (connection?.nodes ?? []).filter(allowed)
+    if (alias.startsWith('c')) {
+      nodes.forEach(add)
+      continue
+    }
+    const chosen = [...nodes].sort((a, b) => STATE_RANK[a.state as PrState] - STATE_RANK[b.state as PrState])[0]
+    if (chosen) add(chosen)
   }
   return [...byNumber.values()]
 }
@@ -193,19 +201,56 @@ function below(pr: Pr, group: PrGroup): Pr[] {
   }
 }
 
+function blockingStep(pr: Pr): NextStep | null {
+  if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return { label: 'conflicts', tone: 'bad' }
+  if (pr.checks.fail > 0) return { label: 'checks failing', tone: 'bad' }
+  if (pr.review === 'CHANGES_REQUESTED') return { label: 'changes requested', tone: 'bad' }
+  return null
+}
+
+function waitingStep(pr: Pr): NextStep | null {
+  if (pr.checks.pending > 0) return { label: 'checks pending', tone: 'warn' }
+  if (pr.review === 'REVIEW_REQUIRED') return { label: 'review needed', tone: 'warn' }
+  if (pr.mergeState === 'BEHIND') return { label: 'behind base', tone: 'warn' }
+  return null
+}
+
+export function ownTone(pr: Pr): Tone {
+  if (pr.state === 'MERGED') return 'merged'
+  if (pr.state === 'CLOSED' || pr.isDraft) return 'muted'
+  return (blockingStep(pr) ?? waitingStep(pr))?.tone ?? 'good'
+}
+
 export function nextStep(pr: Pr, group: PrGroup): NextStep {
   if (pr.state === 'MERGED') return { label: 'merged', tone: 'merged' }
   if (pr.state === 'CLOSED') return { label: 'closed', tone: 'muted' }
   if (pr.isDraft) return { label: 'draft', tone: 'muted' }
-  const blocker = below(pr, group).find(one => one.state === 'OPEN')
-  if (blocker) return { label: `blocked by #${blocker.number}`, tone: 'warn' }
-  if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return { label: 'conflicts', tone: 'bad' }
-  if (pr.checks.fail > 0) return { label: 'checks failing', tone: 'bad' }
-  if (pr.review === 'CHANGES_REQUESTED') return { label: 'changes requested', tone: 'bad' }
-  if (pr.checks.pending > 0) return { label: 'checks pending', tone: 'warn' }
-  if (pr.review === 'REVIEW_REQUIRED') return { label: 'review needed', tone: 'warn' }
-  if (pr.mergeState === 'BEHIND') return { label: 'behind base', tone: 'warn' }
-  return { label: 'ready to merge', tone: 'good' }
+  const lower = below(pr, group).filter(one => one.state === 'OPEN')
+
+  if (!pr.stack) {
+    if (lower[0]) return { label: `blocked by #${lower[0].number}`, tone: 'warn' }
+    return blockingStep(pr) ?? waitingStep(pr) ?? { label: 'ready to merge', tone: 'good' }
+  }
+
+  // Merging a PR in a native stack merges every open PR below it, so their problems are this PR's too.
+  const own = blockingStep(pr)
+  if (own) return own
+  for (const one of [...lower].reverse()) {
+    if (one.isDraft) return { label: `#${one.number} draft`, tone: 'warn', isInherited: true }
+    const step = blockingStep(one) ?? waitingStep(one)
+    if (step) return { label: `#${one.number} ${step.label}`, tone: step.tone, isInherited: true }
+  }
+  const waiting = waitingStep(pr)
+  if (waiting) return waiting
+  const bottom = lower.at(-1)
+  if (!bottom) return { label: 'ready to merge', tone: 'good' }
+  const label = lower.length === 1 ? `ready · with #${bottom.number}` : `ready · merges #${bottom.number}–#${pr.number}`
+  return { label, tone: 'good' }
+}
+
+export function childBranches(prs: Pr[], asked: Set<string>): string[] {
+  const wanted = prs.filter(pr => !pr.stack && pr.state === 'OPEN' && !asked.has(pr.head)).map(pr => pr.head)
+  return [...new Set(wanted)]
 }
 
 export function parentBranches(prs: Pr[], defaultBranch: string): string[] {

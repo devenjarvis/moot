@@ -37,7 +37,7 @@ export type PrGroup = {
 
 export type Tone = 'good' | 'bad' | 'warn' | 'muted' | 'merged'
 
-export type NextStep = { label: string; tone: Tone }
+export type NextStep = { label: string; tone: Tone; isInherited?: true }
 
 export type TrackedBranch = { root: string; branch: string }
 

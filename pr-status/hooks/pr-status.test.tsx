@@ -178,7 +178,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const ui = await $.ui.mount({ plugin: 'pr-status', surface, component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
     expect(await ui.find({ type: 'Text', text: /Stack #4 · 3 PRs → main/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'blocked by #101' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'ready · with #101' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /HEAD/ })).toBeDefined()
     const rows = ['open-103', 'open-102', 'open-101']
     for (const key of rows) expect(await ui.find({ key })).toBeDefined()
@@ -214,8 +214,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     world.then = { exitCode: 0, stdout: reply([node(5, 'feat-base', 'main')]) }
     await start($, clock)
     const queries = graphqlCalls(world)
-    expect(queries.length).toBe(2)
+    expect(queries.length).toBe(3)
     expect(queries[1]!.includes('b0=feat-base')).toBe(true)
+    expect(queries[2]!.includes('c0=feat-base')).toBe(true)
 
     const ui = await $.ui.mount({ plugin: 'pr-status', surface, component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
     expect(await ui.find({ type: 'Text', text: 'Stack · 2 PRs → main' })).toBeDefined()
@@ -283,5 +284,47 @@ test('a merged PR keeps the pane up and shows its final state', async ($, on) =>
   const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
   expect(await ui.find({ type: 'Text', text: 'merged' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /1 merged/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a problem below is drawn as inherited, apart from the PR own state', async ($, on) => {
+  const failing = { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: 'StatusContext', state: 'FAILURE' }] } } } }] }
+  const stack = {
+    ...STACK,
+    size: 2,
+    entries: {
+      nodes: [
+        { position: 1, pullRequest: node(101, 'feat-1', 'main', { commits: failing }) },
+        { position: 2, pullRequest: node(102, 'feat-2', 'feat-1') },
+      ],
+    },
+  }
+  const { world, clock } = setup($, on)
+  world.branch = 'feat-2'
+  world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack, stackEntry: { position: 2 } })]) }
+  await start($, clock)
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: '↓ #101 checks failing' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'checks failing' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '✗ 1' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an inferred stack also finds PRs stacked above the tracked branch', async ($, on) => {
+  const first = JSON.stringify({
+    data: { repository: { b0: { nodes: [node(8, 'feat-a', 'feat-base')] }, c0: { nodes: [node(9, 'feat-top', 'feat-a')] } } },
+  })
+  const later = JSON.stringify({ data: { repository: { b0: { nodes: [node(5, 'feat-base', 'main')] }, c0: { nodes: [] } } } })
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: first })
+  world.then = { exitCode: 0, stdout: later }
+  await start($, clock)
+  const queries = graphqlCalls(world)
+  expect(queries[0]!.includes('c0=feat-a')).toBe(true)
+  expect(queries[1]!.includes('b0=feat-base')).toBe(true)
+  expect(queries[1]!.includes('c0=feat-top')).toBe(true)
+
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: 'Stack · 3 PRs → main' })).toBeDefined()
+  expect(await ui.find({ key: 'open-9' })).toBeDefined()
   await ui.unmount()
 })

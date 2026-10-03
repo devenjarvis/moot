@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Pr, PrGroup, Snapshot, Tone, TrackedBranch } from '../types'
-import { buildQuery, groupPrs, nextStep, parentBranches, parsePrs } from './github'
+import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
 
 const PANE = 'pr-status'
 const TITLE = 'Pull requests'
@@ -15,7 +15,7 @@ const dismissed = atom({ plugin: 'pr-status', key: 'dismissed' } as const, false
 const ACTIVE_MS = 60_000
 const IDLE_MS = 180_000
 const AFTER_COMMAND_MS = 5_000
-const PARENT_ROUNDS = 5
+const STACK_ROUNDS = 5
 const TRIGGER = /\bgh\s+(pr|stack)\b|\bgit\s+push\b/
 
 const ACCENT = '#a78bfa'
@@ -101,7 +101,7 @@ async function repoInfo($: EngineInterface, root: string): Promise<RepoInfo> {
   return info
 }
 
-async function query($: EngineInterface, root: string, info: RepoInfo, wanted: string[]): Promise<Pr[]> {
+async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]): Promise<Pr[]> {
   const withStack = stackFields.get(root) ?? true
   const [owner = '', name = ''] = info.repo.split('/')
   const argv = [
@@ -109,12 +109,13 @@ async function query($: EngineInterface, root: string, info: RepoInfo, wanted: s
     'api',
     'graphql',
     '-f',
-    `query=${buildQuery(wanted, withStack)}`,
+    `query=${buildQuery(heads, bases, withStack)}`,
     '-f',
     `owner=${owner}`,
     '-f',
     `name=${name}`,
-    ...wanted.flatMap((branch, i) => ['-f', `b${i}=${branch}`]),
+    ...heads.flatMap((branch, i) => ['-f', `b${i}=${branch}`]),
+    ...bases.flatMap((branch, i) => ['-f', `c${i}=${branch}`]),
   ]
   const res = await run($, argv, root, 20_000)
   if (!res) throw new Error('gh is not installed')
@@ -122,7 +123,7 @@ async function query($: EngineInterface, root: string, info: RepoInfo, wanted: s
     const message = `${res.stderr}\n${res.stdout}`
     if (withStack && /Field '(?:stack|stackEntry)'/.test(message)) {
       stackFields.set(root, false)
-      return query($, root, info, wanted)
+      return query($, root, info, heads, bases)
     }
     throw new Error(firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed')
   }
@@ -131,16 +132,20 @@ async function query($: EngineInterface, root: string, info: RepoInfo, wanted: s
 
 async function fetchRoot($: EngineInterface, root: string, names: string[]) {
   const info = await repoInfo($, root)
-  const asked = new Set<string>()
+  const askedHeads = new Set<string>()
+  const askedBases = new Set<string>()
   const prs: Pr[] = []
-  let wanted = names.filter(name => name !== info.defaultBranch)
-  for (let round = 0; round <= PARENT_ROUNDS && wanted.length > 0; round++) {
-    wanted.forEach(name => asked.add(name))
-    for (const pr of await query($, root, info, wanted)) {
-      const isParent = round > 0
-      if ((!isParent || pr.state === 'OPEN') && !prs.some(one => one.number === pr.number)) prs.push(pr)
+  let heads = names.filter(name => name !== info.defaultBranch)
+  let bases = heads
+  for (let round = 0; round <= STACK_ROUNDS && heads.length + bases.length > 0; round++) {
+    heads.forEach(name => askedHeads.add(name))
+    bases.forEach(name => askedBases.add(name))
+    for (const pr of await query($, root, info, heads, bases)) {
+      const isFound = round > 0 || !heads.includes(pr.head)
+      if ((!isFound || pr.state === 'OPEN') && !prs.some(one => one.number === pr.number)) prs.push(pr)
     }
-    wanted = parentBranches(prs, info.defaultBranch).filter(name => !asked.has(name))
+    heads = parentBranches(prs, info.defaultBranch).filter(name => !askedHeads.has(name))
+    bases = childBranches(prs, askedBases)
   }
   return { repo: info.repo, prs }
 }
@@ -230,12 +235,6 @@ function clip(text: string, room: number): string {
   return text.length <= room ? text : `${text.slice(0, Math.max(1, room - 1))}…`
 }
 
-function checksText(pr: Pr): string {
-  const { pass, fail, pending } = pr.checks
-  if (pass + fail + pending === 0) return 'no checks'
-  return `✓${pass} ✗${fail} ◷${pending}`
-}
-
 const REVIEW_TEXT: Record<string, string> = {
   APPROVED: 'approved',
   CHANGES_REQUESTED: 'changes requested',
@@ -290,7 +289,10 @@ export const register: Register = on => {
   })
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
-    if (e.origin.kind === 'person') await update($, dismissed, () => true)
+    if (e.origin.kind === 'person') {
+      await update($, dismissed, () => true)
+      $.ui.toast('PR pane closed. Run /prs to bring it back.', { timeoutMs: 8_000 })
+    }
     return next(e)
   })
 
@@ -344,11 +346,18 @@ export const register: Register = on => {
 
     const row = (pr: Pr, group: PrGroup, isStack: boolean) => {
       const step = nextStep(pr, group)
+      const stepLabel = step.isInherited ? `↓ ${step.label}` : step.label
       const isHead = here !== null && snap.repos[here.root] === pr.repo && here.branch === pr.head
-      const room = width - step.label.length - (isHead ? 10 : 5)
+      const room = width - stepLabel.length - (isHead ? 10 : 5)
+      const rail = isStack ? '│' : ' '
+      const { pass, fail, pending } = pr.checks
+      const hasChecks = pass + fail + pending > 0
+      const count = (key: string, mark: string, n: number, tone: Tone) => (
+        <Text key={key} color={n > 0 ? TONES[tone] : MUTED} dimColor={n === 0}>
+          {`${mark} ${n}`}
+        </Text>
+      )
       const details = [
-        stateText(pr),
-        checksText(pr),
         pr.review ? REVIEW_TEXT[pr.review] : '',
         pr.unresolved > 0 ? `${pr.unresolved} unresolved` : '',
         `+${pr.additions} −${pr.deletions}`,
@@ -361,7 +370,7 @@ export const register: Register = on => {
         <Box key={`row-${keyOf(pr)}`} flexDirection="column">
           <Box justifyContent="space-between">
             <Box>
-              <Text color={TONES[step.tone]}>{`${isStack ? '│' : ' '}${glyph(pr)} `}</Text>
+              <Text color={TONES[ownTone(pr)]}>{`${rail}${glyph(pr)} `}</Text>
               <Button
                 key={openKey(pr)}
                 plain
@@ -377,12 +386,34 @@ export const register: Register = on => {
                   </Text>
                 </Box>
               )}
-              <Text color={TONES[step.tone]} bold>
-                {step.label}
-              </Text>
+              {step.isInherited ? (
+                <Text color={TONES[step.tone]} dimColor>
+                  {stepLabel}
+                </Text>
+              ) : (
+                <Text color={TONES[step.tone]} bold>
+                  {stepLabel}
+                </Text>
+              )}
             </Box>
           </Box>
-          <Text color={MUTED} wrap="truncate-end">{`${isStack ? '│' : ' '}  ${details}`}</Text>
+          <Box gap={2}>
+            <Text color={MUTED}>{`${rail}  ${stateText(pr)}`}</Text>
+            {hasChecks ? (
+              <Box gap={2}>
+                {count('pass', '✓', pass, 'good')}
+                {count('fail', '✗', fail, 'bad')}
+                {count('pending', '◷', pending, 'warn')}
+              </Box>
+            ) : (
+              <Text color={MUTED}>no checks</Text>
+            )}
+            {details && (
+              <Text color={MUTED} wrap="truncate-end">
+                {details}
+              </Text>
+            )}
+          </Box>
         </Box>
       )
     }

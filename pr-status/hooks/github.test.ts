@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Pr } from '../types'
-import { buildQuery, groupPrs, nextStep, parentBranches, parsePrs } from './github'
+import type { Pr, PrGroup } from '../types'
+import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
 
 type Node = Record<string, unknown>
 
@@ -94,12 +94,14 @@ const pr = (number: number, head: string, base: string, over: Partial<Pr> = {}):
 })
 
 test('buildQuery passes branch names as variables and drops stack fields on request', async () => {
-  const withStack = buildQuery(['feat-a', 'fe"at-b'], true)
+  const withStack = buildQuery(['feat-a', 'fe"at-b'], ['feat-a'], true)
   expect(withStack).toContain('$b0: String!')
   expect(withStack).toContain('b1: pullRequests(headRefName: $b1')
   expect(withStack).toContain('stackEntry')
   expect(withStack.includes('fe"at-b')).toBe(false)
-  expect(buildQuery(['feat-a'], false).includes('stack')).toBe(false)
+  expect(withStack).toContain('c0: pullRequests(baseRefName: $c0')
+  expect(withStack).toContain('$c0: String!')
+  expect(buildQuery(['feat-a'], [], false).includes('stack')).toBe(false)
 })
 
 test('parsePrs reads a native stack, drops fork PRs and counts checks', async () => {
@@ -145,7 +147,7 @@ test('nextStep follows the precedence', async () => {
   const [top, mid, bottom] = group.prs
   expect(nextStep(bottom!, group).label).toBe('merged')
   expect(nextStep(mid!, group).label).toBe('checks failing')
-  expect(nextStep(top!, group)).toEqual({ label: 'blocked by #102', tone: 'warn' })
+  expect(nextStep(top!, group)).toEqual({ label: '#102 checks failing', tone: 'bad', isInherited: true })
 
   const lone = (over: Partial<Pr>) => {
     const one = pr(1, 'a', 'main', over)
@@ -160,6 +162,86 @@ test('nextStep follows the precedence', async () => {
   expect(lone({ checks: { pass: 1, fail: 0, pending: 2 } })).toBe('checks pending')
   expect(lone({ review: 'REVIEW_REQUIRED' })).toBe('review needed')
   expect(lone({ mergeState: 'BEHIND' })).toBe('behind base')
+})
+
+const stacked = (number: number, position: number, size: number, over: Partial<Pr> = {}) =>
+  pr(number, `s${position}`, position === 1 ? 'main' : `s${position - 1}`, {
+    stack: { number: 9, size, base: 'main', position },
+    ...over,
+  })
+
+const nativeGroup = (prs: Pr[]): PrGroup => ({ key: 'k', repo: 'o/r', stack: 9, base: 'main', size: prs.length, prs })
+
+test('in a native stack a clean PR merges the open PRs below it', async () => {
+  const two = nativeGroup([stacked(20, 2, 2), stacked(19, 1, 2)])
+  expect(nextStep(two.prs[0]!, two)).toEqual({ label: 'ready · with #19', tone: 'good' })
+  expect(nextStep(two.prs[1]!, two)).toEqual({ label: 'ready to merge', tone: 'good' })
+
+  const three = nativeGroup([stacked(21, 3, 3), stacked(20, 2, 3), stacked(19, 1, 3)])
+  expect(nextStep(three.prs[0]!, three).label).toBe('ready · merges #19–#21')
+
+  const landed = nativeGroup([stacked(21, 3, 3), stacked(20, 2, 3), stacked(19, 1, 3, { state: 'MERGED' })])
+  expect(nextStep(landed.prs[0]!, landed).label).toBe('ready · with #20')
+})
+
+test('in a native stack the lowest problem below is named, after the PR own blocking problems', async () => {
+  const group = nativeGroup([
+    stacked(21, 3, 3),
+    stacked(20, 2, 3, { checks: { pass: 1, fail: 0, pending: 1 } }),
+    stacked(19, 1, 3, { review: 'REVIEW_REQUIRED' }),
+  ])
+  expect(nextStep(group.prs[0]!, group)).toEqual({ label: '#19 review needed', tone: 'warn', isInherited: true })
+  expect(nextStep(group.prs[1]!, group)).toEqual({ label: '#19 review needed', tone: 'warn', isInherited: true })
+
+  const draftBelow = nativeGroup([stacked(20, 2, 2), stacked(19, 1, 2, { isDraft: true })])
+  expect(nextStep(draftBelow.prs[0]!, draftBelow)).toEqual({ label: '#19 draft', tone: 'warn', isInherited: true })
+
+  const ownConflict = nativeGroup([stacked(20, 2, 2, { mergeable: 'CONFLICTING' }), stacked(19, 1, 2, { review: 'REVIEW_REQUIRED' })])
+  expect(nextStep(ownConflict.prs[0]!, ownConflict).label).toBe('conflicts')
+
+  const ownPending = nativeGroup([stacked(20, 2, 2, { review: 'REVIEW_REQUIRED' }), stacked(19, 1, 2)])
+  expect(nextStep(ownPending.prs[0]!, ownPending).label).toBe('review needed')
+})
+
+test('ownTone colors a PR by its own state, not the stack below', async () => {
+  const group = nativeGroup([
+    stacked(20, 2, 2, { checks: { pass: 0, fail: 0, pending: 1 } }),
+    stacked(19, 1, 2, { checks: { pass: 0, fail: 1, pending: 0 } }),
+  ])
+  expect(nextStep(group.prs[0]!, group)).toEqual({ label: '#19 checks failing', tone: 'bad', isInherited: true })
+  expect(ownTone(group.prs[0]!)).toBe('warn')
+  expect(ownTone(group.prs[1]!)).toBe('bad')
+  expect(ownTone(pr(1, 'a', 'main'))).toBe('good')
+  expect(ownTone(pr(1, 'a', 'main', { state: 'MERGED' }))).toBe('merged')
+  expect(ownTone(pr(1, 'a', 'main', { isDraft: true }))).toBe('muted')
+})
+
+test('an inferred stack still waits on the PR below', async () => {
+  const groups = groupPrs([pr(7, 'top', 'bottom'), pr(5, 'bottom', 'main')])
+  const group = groups[0]!
+  expect(nextStep(group.prs[0]!, group)).toEqual({ label: 'blocked by #5', tone: 'warn' })
+})
+
+test('parsePrs keeps every open child PR based on a branch', async () => {
+  const json = {
+    data: {
+      repository: {
+        b0: { nodes: [core(8, 'feat-a', 'main')] },
+        c0: { nodes: [core(9, 'feat-b', 'feat-a'), core(10, 'feat-c', 'feat-a'), core(11, 'x', 'feat-a', { headRepository: { nameWithOwner: 'fork/r' } })] },
+      },
+    },
+  }
+  expect(parsePrs(json, 'o/r', ['o/r']).map(one => one.number)).toEqual([8, 9, 10])
+})
+
+test('childBranches asks for the heads of open inferred PRs not asked yet', async () => {
+  const prs = [
+    pr(7, 'top', 'mid'),
+    pr(5, 'mid', 'main'),
+    pr(4, 'old', 'main', { state: 'MERGED' }),
+    pr(3, 'native', 'main', { stack: { number: 1, size: 1, base: 'main', position: 1 } }),
+  ]
+  expect(childBranches(prs, new Set(['mid']))).toEqual(['top'])
 })
 
 test('parentBranches asks for bases that are not fetched and not the default', async () => {
