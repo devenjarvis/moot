@@ -41,21 +41,7 @@ Tasks are checkboxes, each carrying the files it touches (cited `file:line`), th
 
 Once you approve a plan it is also written to `.claude/plan.md` in the worktree root — an uncommitted handoff artifact so `/build-it` and `/ship-it` can pick the work up in a fresh session. It is written only on approval: a `plan.md` for a plan you rejected would be picked up as real work by the next session.
 
-`plan-it` generates `.claude/plan.html` and opens it in your browser **before** asking you to approve — you review the plan in the reading view and give feedback there, and each round of feedback re-renders the same page. Until you approve, the page carries a "not yet approved" draft banner; approving re-renders it without one, so the banner going away is the signal that the plan landed.
-
-Plans are dense to review in a terminal, and the density is structural: the task sub-bullets (`Files:`, `Test first:`, `Verify:`, …) are written for the coding agent, not for you, so they take most of the vertical space on a surface where everything is weighted equally. Context, Reuse and Risks are the same — reference material the building agent looks things up in. The HTML view folds both out of the way: task sub-bullets behind each task's name, and those three sections behind their own headings, leaving the goal, the acceptance criteria and the task names to read at a glance. What you are checking for correctness stays open. It also sets each task's `Files:`/`Verify:`/`Boundaries:` sub-bullets as a two-column field table, and adds a sticky section index, a task count taken from the `- [x]` counts, and `file:line` chips — and prints cleanly, with everything folded opened for the printout and put back afterwards. The count only grows a progress bar while a plan is part-done: a 0% bar at review time is noise, and since the page is not re-rendered as work lands, a full one would mostly mean "rendered after the fact".
-
-It opens the page rather than printing a `file://` link because terminals generally only linkify web URLs — Ghostty and Terminal.app both leave `file://` inert, so a printed link has to be copy-pasted, which is exactly the friction this is meant to remove. Pass `--open` to opt in; the script skips it in a remote session and tells you where the file is instead.
-
-It is a **generated read-only view**; the markdown is the source of truth. Nothing is ever hand-edited into the HTML, and no plan content passes through the model a second time to produce it — `render-plan.sh` is a shell concatenation of three templates, the plan source, and a vendored copy of [marked](https://github.com/markedjs/marked) (MIT, pinned in `plan-it/assets/MARKED-LICENSE.md`). The page opens with no network access.
-
-Because it is generated, it goes stale as `/build-it` ticks checkboxes. Refresh it whenever you like:
-
-```bash
-plan-it/render-plan.sh .claude/plan.md .claude/plan.html
-```
-
-Full usage is `render-plan.sh [--open] [--draft] <plan.md> <out.html>`; `--draft` is what stamps the page as not yet approved. The same script renders any plan markdown, including the archived plans under `~/.claude/plans/`.
+You review and approve the plan in the [`plan-review`](#plan-review) mod's pane, which replaces the built-in plan approval dialog.
 
 ### `/build-it`
 
@@ -143,17 +129,6 @@ moot/
     SKILL.md          # Capability-card skill definition
   plan-it/
     SKILL.md          # Plan-it skill definition
-    render-plan.sh    # Renders a plan markdown file to one self-contained HTML page
-    assets/
-      template-head.html   # Page shell, stylesheet, and the plan-aware layer
-      template-mid.html    # Seam between the plan source and the parser
-      template-tail.html   # Closing tags
-      marked.umd.js        # Vendored markdown parser (MIT)
-      MARKED-LICENSE.md    # Pinned version, checksum, and license
-    test/
-      fixture-plan.md      # Plan exercising every construct the renderer must survive
-      render-test.sh       # Assertions that need no browser
-      dom-test.mjs         # Behavioral assertions run in a real DOM, when jsdom is reachable
   build-it/
     SKILL.md          # Build-it skill definition
     implementer-prompt.md  # Template for subagent dispatch

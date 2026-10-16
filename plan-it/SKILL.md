@@ -29,7 +29,7 @@ Use `AskUserQuestion` for what you genuinely can't answer from the codebase. For
 
 Use `EnterPlanMode` to write the plan to Claude's built-in plan file. Do not create separate plan documents in the repo.
 
-The plan has two readers: a coding agent that will execute it end to end, and a human scanning it for correctness before approving. The human reads Goal, Spec, and the task names; the agent reads the per-task sub-bullets, and Context, Reuse and Risks are reference material it looks things up in. The reading view folds the second and third of those, so write each part for whoever actually reads it. Emit the sections the tier owes, in this order:
+The plan has two readers: a coding agent that will execute it end to end, and a human scanning it for correctness before approving. The human reads Goal, Spec, and the task names; the agent reads the per-task sub-bullets, and Context, Reuse and Risks are reference material it looks things up in. Write each part for whoever actually reads it. Emit the sections the tier owes, in this order:
 
 ```
 # Goal
@@ -77,50 +77,19 @@ Plan principles: tasks describe intent and boundaries, never step-by-step code; 
 
 Context, Reuse and Risks are the exception to that no-word-cap principle, and they have caps for a different reason than padding. They are reference material — a bullet is a fact the building agent looks up, not an argument the reader works through — so each one stays a single scannable line and the section stays within its cap. A fact that needs a paragraph of justification is really a constraint on one task: put it in that task's `Implement:` or `Boundaries:`, where whoever acts on it will actually be looking. Cutting a real finding to hit a cap is the wrong trade; if a section genuinely needs more, the plan is too large and belongs split.
 
-### 5. Render the Plan and Open It — Before the Approval Gate
+### 5. Exit Plan Mode
 
-Always, no exceptions, and *before* `ExitPlanMode`. The reader is being asked to approve this plan; they get to read it in the reading view first, and give feedback on it there:
+`ExitPlanMode`. This is the approval gate: the reader reviews the plan there and either approves it or sends feedback. On feedback, edit the plan file, say what changed, and call `ExitPlanMode` again.
 
-```sh
-mkdir -p "$PWD/.claude"
-{skill-dir}/render-plan.sh --open --draft "<plan-mode plan file>" "$PWD/.claude/plan.html"
-```
-
-`{skill-dir}` is this skill's base directory, given to you when the skill loads — never a hardcoded user path. The source is the plan file plan mode gave you (`~/.claude/plans/<slug>.md`), which is the live document at this point. `mkdir -p` matters: in a fresh worktree there is no `.claude/` yet, and the renderer exits 2 on a missing output directory.
-
-This writes a file during plan mode, which is deliberate and narrowly scoped. It is allowed: plan mode restricts the Write/Edit tools, and `render-plan.sh` is a shell script that writes through `mktemp`/`mv`. Nothing here touches the repo's source — `plan.html` is generated and `.claude/` is gitignored. Do not generalise it: `.claude/plan.md` is still written only after approval, in step 7.
-
-`--draft` puts a "not yet approved" banner on the page, so a preview can't be mistaken for a signed-off plan — and so a `plan.html` newer than `plan.md` isn't read as authoritative. The re-render in step 7 drops it, which makes the banner going away the signal that approval landed.
-
-`--open` opens the page in the default browser. Don't paste a `file://` URL and call it clickable — terminals generally only linkify web URLs, so such a link has to be copied by hand, which defeats the point. The script skips opening in a remote session and prints where the file is instead — in that case say the plan is reviewable at `.claude/plan.md` on the host, and don't wait on a page the reader can't see.
-
-Then, on each round of feedback: edit the plan file, re-run the same command, and say what changed. The browser refocuses the existing tab, so revising is cheap and the reader stays on one page.
-
-If the render fails, say so in one line and go to `ExitPlanMode` anyway. A missing reading view never blocks the gate — the plan is still reviewable as text, and step 7 renders it again.
-
-### 6. Exit Plan Mode
-
-`ExitPlanMode`. The reader has already seen the page, so this is the approval gate, not the first look.
-
-### 7. Write the Handoff File, Then Re-render
+### 6. Write the Handoff File
 
 Once approved: write the same plan content to `{worktree-root}/.claude/plan.md` — an absolute path from `pwd`, never `~/.claude/plan.md`. This is the cross-session handoff artifact build-it and ship-it read; skipping it breaks them in a fresh session. It stays uncommitted (`.claude/` is gitignored). It is written only now, never during plan mode: a `plan.md` for a plan the reader rejected would be picked up as real work by the next session.
 
-Then re-render from it, without `--draft` and without `--open` — the page is already in front of them:
+### 7. Handoff to Execution
 
-```sh
-{skill-dir}/render-plan.sh "$PWD/.claude/plan.md" "$PWD/.claude/plan.html"
-```
+The reader has already reviewed and approved the plan, so confirm rather than present:
 
-`plan.html` is generated: a single self-contained page that folds each task's agent-facing sub-bullets, and the Context, Reuse and Risks sections, so the goal, the criteria and the task names read at a glance. Never hand-edit it and never author the HTML yourself — the markdown is the source of truth and the script costs no tokens. Re-run the same command to refresh it after build-it ticks checkboxes.
-
-### 8. Handoff to Execution
-
-The reader has already reviewed and approved the page, so confirm rather than present:
-
-> Approved plan is in `.claude/plan.html`, and `.claude/plan.md` for a fresh session.
+> Approved plan is in `.claude/plan.md` for a fresh session.
 > Say the word and I'll execute it.
-
-Name the path as text so it's on record, and don't dress it up as a link. When the render failed, or the session is remote so the file isn't on the reader's machine, point at `.claude/plan.md` alone and don't apologize for it.
 
 When the user accepts ("looks good", "do it", "go ahead", "execute", "yes", "ship it"), invoke the `build-it` skill via the Skill tool before writing any code.
