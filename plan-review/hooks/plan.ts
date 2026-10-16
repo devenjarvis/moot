@@ -95,18 +95,38 @@ export function feedbackFor(review: PlanReview): string {
 export type Block =
   | { kind: 'markdown'; text: string }
   | { kind: 'item'; text: string }
-  | { kind: 'table'; header: string[]; rows: string[][] }
+  | { kind: 'list'; text: string }
+  | { kind: 'table'; header: string[]; align: Align[]; rows: string[][] }
+
+export type Align = 'left' | 'center' | 'right' | null
 
 const FENCE = /^\s*(```|~~~)/
 const ITEM = /^(?:\d+[.)]|[-*+])\s+/
-const TABLE_ROW = /^\s*\|/
-const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
+const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/
+const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+const BLOCK_START = /^\s{0,3}(?:#{1,6}\s|>|\||```|~~~)/
+const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/
+
+function isItem(line: string): boolean {
+  return ITEM.test(line) && !RULE.test(line)
+}
+
+function hasPipe(line: string): boolean {
+  return /(?:^|[^\\])\|/.test(line)
+}
 
 function cells(line: string): string[] {
   const out: string[] = []
   let cell = ''
   let inCode = false
-  for (const ch of line.trim().replace(/^\|/, '').replace(/\|$/, '')) {
+  const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '')
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]
+    if (ch === '\\' && inner[i + 1] === '|') {
+      cell += '|'
+      i++
+      continue
+    }
     if (ch === '`') inCode = !inCode
     if (ch === '|' && !inCode) {
       out.push(cell.trim())
@@ -119,8 +139,139 @@ function cells(line: string): string[] {
   return out
 }
 
-export function plainCell(cell: string): string {
-  return cell.replace(/\*\*|__|`/g, '')
+function aligns(rule: string): Align[] {
+  return cells(rule).map(cell => {
+    const left = cell.startsWith(':')
+    const right = cell.endsWith(':')
+    return left && right ? 'center' : right ? 'right' : left ? 'left' : null
+  })
+}
+
+export type Span = { text: string; bold?: boolean; italic?: boolean; strike?: boolean; code?: boolean; href?: string }
+type Style = Omit<Span, 'text'>
+
+const ESCAPABLE = /[\\`*_{}[\]()#+\-.!|~<>]/
+const LINK = /^\[((?:\\.|[^\]\\])*)\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/
+const AUTOLINK = /^<((?:https?|file):\/\/[^>\s]+)>/
+const BARE_URL = /^https?:\/\/[^\s<]*[^\s<.,:;"')\]*_~]/
+const EMPHASIS: [string, keyof Style][] = [
+  ['**', 'bold'],
+  ['__', 'bold'],
+  ['~~', 'strike'],
+  ['*', 'italic'],
+  ['_', 'italic'],
+]
+
+function closing(text: string, from: number, mark: string): number {
+  for (let j = from; j < text.length; j++) {
+    if (text[j] === '\\') {
+      j++
+      continue
+    }
+    if (text[j] === '`') {
+      const end = text.indexOf('`', j + 1)
+      if (end > j) j = end
+      continue
+    }
+    if (mark.length === 1 && text.startsWith(mark + mark, j)) {
+      j++
+      continue
+    }
+    if (!text.startsWith(mark, j) || /\s/.test(text[j - 1] ?? ' ')) continue
+    if (mark === '_' || mark === '__') {
+      if (/\w/.test(text[j + mark.length] ?? '')) continue
+    }
+    return j
+  }
+  return -1
+}
+
+/** Splits one line of inline markdown into styled runs: emphasis, code, strikethrough and links. */
+export function inlineSpans(text: string, style: Style = {}): Span[] {
+  const out: Span[] = []
+  let plain = ''
+  const flush = () => {
+    if (plain) out.push({ ...style, text: plain })
+    plain = ''
+  }
+  let i = 0
+  scan: while (i < text.length) {
+    const ch = text[i] ?? ''
+    const rest = text.slice(i)
+    if (ch === '\\' && ESCAPABLE.test(text[i + 1] ?? '')) {
+      plain += text[i + 1]
+      i += 2
+      continue
+    }
+    if (ch === '`') {
+      const run = /^`+/.exec(rest)?.[0] ?? '`'
+      const end = text.indexOf(run, i + run.length)
+      if (end > i) {
+        flush()
+        const code = text.slice(i + run.length, end)
+        out.push({ ...style, code: true, text: /^ .* $/.test(code) ? code.slice(1, -1) : code })
+        i = end + run.length
+        continue
+      }
+      plain += run
+      i += run.length
+      continue
+    }
+    const link = ch === '[' ? LINK.exec(rest) : ch === '<' ? AUTOLINK.exec(rest) : null
+    if (link) {
+      flush()
+      const href = ch === '[' ? (link[2] ?? '') : (link[1] ?? '')
+      const label = ch === '[' ? (link[1] ?? '') : href
+      out.push(...(label ? inlineSpans(label, { ...style, href }) : [{ ...style, href, text: href }]))
+      i += link[0].length
+      continue
+    }
+    if (ch === 'h' && !style.href && !/\w/.test(text[i - 1] ?? '')) {
+      const url = BARE_URL.exec(rest)?.[0]
+      if (url) {
+        flush()
+        out.push({ ...style, href: url, text: url })
+        i += url.length
+        continue
+      }
+    }
+    for (const [mark, key] of EMPHASIS) {
+      if (!text.startsWith(mark, i) || style[key]) continue
+      const after = text[i + mark.length] ?? ''
+      if (!after || /\s/.test(after)) continue
+      if (mark[0] === '_' && /\w/.test(text[i - 1] ?? '')) continue
+      const end = closing(text, i + mark.length, mark)
+      if (end < 0) continue
+      flush()
+      out.push(...inlineSpans(text.slice(i + mark.length, end), { ...style, [key]: true }))
+      i = end + mark.length
+      continue scan
+    }
+    plain += ch
+    i++
+  }
+  flush()
+  return out
+}
+
+/** The text a reader sees once inline markdown is drawn: markers and link targets gone. */
+export function plainText(text: string): string {
+  return inlineSpans(text)
+    .map(span => span.text)
+    .join('')
+}
+
+/** Draws task-list boxes as glyphs, so `- [ ]` reads as a checkbox on every surface. */
+export function taskBoxes(text: string): string {
+  let inFence = false
+  return text
+    .split('\n')
+    .map(line => {
+      if (FENCE.test(line)) inFence = !inFence
+      if (inFence) return line
+      return line.replace(TASK, (_, lead: string, mark: string) => `${lead}${mark === ' ' ? '☐' : '☑'}`)
+    })
+    .join('\n')
 }
 
 export function splitBlocks(body: string): Block[] {
@@ -144,34 +295,55 @@ export function splitBlocks(body: string): Block[] {
       continue
     }
 
-    if (TABLE_ROW.test(line) && TABLE_RULE.test(lines[at + 1] ?? '')) {
+    const rule = lines[at + 1] ?? ''
+    if (hasPipe(line) && TABLE_RULE.test(rule) && (/^\s*\|/.test(line) || rule.includes('|'))) {
       flush()
       const header = cells(line)
+      const align = aligns(rule)
       const rows: string[][] = []
       at += 2
-      while (at < lines.length && TABLE_ROW.test(lines[at] ?? '')) {
+      while (at < lines.length && (lines[at] ?? '').trim() && hasPipe(lines[at] ?? '')) {
         rows.push(cells(lines[at] ?? ''))
         at++
       }
-      blocks.push({ kind: 'table', header, rows })
+      blocks.push({ kind: 'table', header, align, rows })
       continue
     }
 
-    if (ITEM.test(line)) {
+    if (isItem(line)) {
       flush()
-      const item = [line]
-      at++
-      let itemFence = false
-      while (at < lines.length) {
-        const more = lines[at] ?? ''
-        const nextLine = lines[at + 1] ?? ''
-        const continues = itemFence || /^\s+\S/.test(more) || (more.trim() === '' && /^\s+\S/.test(nextLine))
-        if (!continues) break
-        if (FENCE.test(more)) itemFence = !itemFence
-        item.push(more)
+      // One run of items; short one-line items stay together as a tight list, richer ones are spaced apart.
+      const items: string[] = []
+      let rich = false
+      while (at < lines.length && isItem(lines[at] ?? '')) {
+        const item = [lines[at] ?? '']
         at++
+        let itemFence = false
+        while (at < lines.length) {
+          const more = lines[at] ?? ''
+          const nextLine = lines[at + 1] ?? ''
+          const prev = item[item.length - 1] ?? ''
+          const lazy = more.trim() !== '' && prev.trim() !== '' && !isItem(more) && !BLOCK_START.test(more) && !RULE.test(more)
+          const continues = itemFence || /^\s+\S/.test(more) || lazy || (more.trim() === '' && /^\s+\S/.test(nextLine))
+          if (!continues) break
+          if (FENCE.test(more)) itemFence = !itemFence
+          item.push(more)
+          at++
+        }
+        if (item.length > 1) rich = true
+        items.push(item.join('\n').trimEnd())
+        if (isItem(lines[at] ?? '')) continue
+        let gap = at
+        while (gap < lines.length && !(lines[gap] ?? '').trim()) gap++
+        if (gap === at || !isItem(lines[gap] ?? '')) break
+        rich = true
+        at = gap
       }
-      blocks.push({ kind: 'item', text: item.join('\n').trimEnd() })
+      if (rich) {
+        for (const text of items) blocks.push({ kind: 'item', text: taskBoxes(text) })
+      } else {
+        blocks.push({ kind: 'list', text: taskBoxes(items.join('\n')) })
+      }
       continue
     }
 
