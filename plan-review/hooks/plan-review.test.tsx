@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { feedbackFor, parsePlan, splitBlocks } from './plan'
+import { feedbackFor, inlineSpans, parsePlan, plainText, splitBlocks } from './plan'
 
 const PLAN = `# Add dark mode
 
@@ -63,8 +63,67 @@ const TABLE_PLAN = `# Keys
 test('splitBlocks finds tables, list items and text', async () => {
   const blocks = splitBlocks('Intro line\n\n| A | B |\n|---|---|\n| 1 | `x|y` |\n\n1. One\n   - nested\n2. Two\n\nOutro')
   expect(blocks.map(block => block.kind)).toEqual(['markdown', 'table', 'item', 'item', 'markdown'])
-  expect(blocks[1]).toEqual({ kind: 'table', header: ['A', 'B'], rows: [['1', '`x|y`']] })
+  expect(blocks[1]).toEqual({ kind: 'table', header: ['A', 'B'], align: [null, null], rows: [['1', '`x|y`']] })
   expect(blocks[2]).toEqual({ kind: 'item', text: '1. One\n   - nested' })
+})
+
+test('splitBlocks keeps short one-line items together as one list', async () => {
+  const blocks = splitBlocks('Today it:\n\n- reads Redis\n- falls back to the DB\n- logs misses\n\nAfter.')
+  expect(blocks).toEqual([
+    { kind: 'markdown', text: 'Today it:' },
+    { kind: 'list', text: '- reads Redis\n- falls back to the DB\n- logs misses' },
+    { kind: 'markdown', text: 'After.' },
+  ])
+})
+
+test('splitBlocks spaces loose lists and keeps lazy lines in their item', async () => {
+  const blocks = splitBlocks('1. One\n\n2. Two\nlazy line\n\n## Next')
+  expect(blocks).toEqual([
+    { kind: 'item', text: '1. One' },
+    { kind: 'item', text: '2. Two\nlazy line' },
+    { kind: 'markdown', text: '## Next' },
+  ])
+})
+
+test('splitBlocks draws task boxes and leaves rules alone', async () => {
+  const blocks = splitBlocks('- [ ] Open\n- [x] Done\n\n* * *\n\n```\n- [ ] in code\n```')
+  expect(blocks).toEqual([
+    { kind: 'list', text: '- ☐ Open\n- ☑ Done' },
+    { kind: 'markdown', text: '* * *\n\n```\n- [ ] in code\n```' },
+  ])
+})
+
+test('splitBlocks reads alignment, escaped pipes and tables without outer pipes', async () => {
+  const blocks = splitBlocks('| L | C | R |\n|:--|:-:|--:|\n| a \\| b | c | d |\n\nName | Value\n--- | ---\nx | y\n\nHeading\n---')
+  expect(blocks[0]).toEqual({ kind: 'table', header: ['L', 'C', 'R'], align: ['left', 'center', 'right'], rows: [['a | b', 'c', 'd']] })
+  expect(blocks[1]).toEqual({ kind: 'table', header: ['Name', 'Value'], align: [null, null], rows: [['x', 'y']] })
+  expect(blocks[2]).toEqual({ kind: 'markdown', text: 'Heading\n---' })
+})
+
+test('inlineSpans styles emphasis, code, strikethrough and links', async () => {
+  expect(inlineSpans('**Stale** reads use `ttl` of [60 s](https://x.dev) ~~now~~ _soon_')).toEqual([
+    { bold: true, text: 'Stale' },
+    { text: ' reads use ' },
+    { code: true, text: 'ttl' },
+    { text: ' of ' },
+    { href: 'https://x.dev', text: '60 s' },
+    { text: ' ' },
+    { strike: true, text: 'now' },
+    { text: ' ' },
+    { italic: true, text: 'soon' },
+  ])
+  expect(inlineSpans('**bold with `code` inside**')).toEqual([
+    { bold: true, text: 'bold with ' },
+    { bold: true, code: true, text: 'code' },
+    { bold: true, text: ' inside' },
+  ])
+})
+
+test('plainText leaves snake_case, lone stars and escapes readable', async () => {
+  expect(plainText('use snake_case_name and 2 * 3 * 4')).toBe('use snake_case_name and 2 * 3 * 4')
+  expect(plainText('a \\*literal\\* star and `**not bold**`')).toBe('a *literal* star and **not bold**')
+  expect(plainText('Task 1: **Add** `ttl`')).toBe('Task 1: Add ttl')
+  expect(plainText('see https://example.com/a.')).toBe('see https://example.com/a.')
 })
 
 test('splitBlocks leaves fenced code whole', async () => {
@@ -182,6 +241,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'open-0' })
     expect(await ui.find({ type: 'Text', text: 'Action' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Next section' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`table cells keep their inline styles on ${surface}`, async ($, on) => {
+    await openReview($, on, '# Risks\n\n## Risks\n| Risk | Fix |\n|---|---|\n| **Stale** reads | Use `ttl`, see [docs](https://example.com) |\n')
+    const ui = await $.ui.mount({ plugin: 'plan-review', surface, component: 'Pane', requestId: 'plan-review', props: PANE_PROPS })
+    expect(await ui.find({ type: 'Text', text: 'Stale' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'ttl' })).toBeDefined()
+    expect(await ui.find({ type: 'Link', text: 'docs' })).toBeDefined()
     await ui.unmount()
   })
 

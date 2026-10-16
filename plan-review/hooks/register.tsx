@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PlanView, Verdict } from '../types'
-import { feedbackFor, noteCount, parsePlan, plainCell, splitBlocks } from './plan'
-import type { Block } from './plan'
+import { feedbackFor, inlineSpans, noteCount, parsePlan, plainText, splitBlocks } from './plan'
+import type { Align, Block } from './plan'
 
 const PANE = 'plan-review'
 const review = atom({ plugin: 'plan-review', key: 'review' } as const, null)
@@ -12,7 +12,13 @@ const ACCENT = '#a78bfa'
 const GOOD = '#4ade80'
 const NOTE = '#fbbf24'
 const MUTED = '#94a3b8'
+const CODE = 'permission'
 const MARKDOWN_LIMIT = 9_800
+const JUSTIFY: Record<Exclude<Align, null>, 'flex-start' | 'center' | 'flex-end'> = {
+  left: 'flex-start',
+  center: 'center',
+  right: 'flex-end',
+}
 
 type Loaded = { text: string; path: string | null }
 
@@ -50,7 +56,11 @@ function go($: EngineInterface, view: PlanView, index?: number) {
 }
 
 function clip(text: string): string {
-  return text.length > MARKDOWN_LIMIT ? `${text.slice(0, MARKDOWN_LIMIT)}\n\n_… cut here; see the plan file for the rest._` : text
+  if (text.length <= MARKDOWN_LIMIT) return text
+  const kept = text.slice(0, MARKDOWN_LIMIT)
+  // Close a fence the cut left open, so the note below is not drawn as code.
+  const fences = kept.split('\n').filter(line => /^\s*(```|~~~)/.test(line)).length
+  return `${kept}${fences % 2 ? '\n```' : ''}\n\n_… cut here; see the plan file for the rest._`
 }
 
 async function approve($: EngineInterface) {
@@ -171,7 +181,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
-    const { Box, Text, Button, Markdown } = ui
+    const { Box, Text, Button, Link, Markdown } = ui
     const Input = 'Input' in ui ? ui.Input : null
     const plan = await read($, review)
 
@@ -197,7 +207,7 @@ export const register: Register = on => {
           <Text color={MUTED}>{plan.path ? plan.path.split('/').slice(-1)[0] : ''}</Text>
         </Box>
         <Text bold wrap="truncate-end">
-          {plan.title}
+          {plainText(plan.title)}
         </Text>
         <Text color={MUTED}>
           {total} sections · {plan.steps} steps · {plan.files.length} files · ~{plan.minutes} min read
@@ -222,10 +232,32 @@ export const register: Register = on => {
       </Box>
     )
 
+    // A cell's inline markdown as styled runs: bold, italic, strikethrough, code and links.
+    const inline = (id: string, text: string) =>
+      inlineSpans(text).map((span, s) =>
+        span.href ? (
+          <Link key={`${id}-${s}`} href={span.href}>
+            {span.text}
+          </Link>
+        ) : span.bold || span.italic || span.strike || span.code ? (
+          <Text
+            key={`${id}-${s}`}
+            bold={span.bold}
+            italic={span.italic}
+            strikethrough={span.strike}
+            color={span.code ? CODE : undefined}
+          >
+            {span.text}
+          </Text>
+        ) : (
+          span.text
+        ),
+      )
+
     const table = (id: string, block: Extract<Block, { kind: 'table' }>) => {
       const columns = Math.max(block.header.length, ...block.rows.map(row => row.length))
       const natural = Array.from({ length: columns }, (_, c) =>
-        Math.max(...[block.header, ...block.rows].map(row => plainCell(row[c] ?? '').length), 1),
+        Math.max(...[block.header, ...block.rows].map(row => plainText(row[c] ?? '').length), 1),
       )
       const room = Math.max(20, width - 2 * columns)
       const widths = natural.map((w, c) => (c === columns - 1 ? w : Math.min(w, Math.floor(room * 0.4))))
@@ -233,20 +265,23 @@ export const register: Register = on => {
       widths[columns - 1] = Math.max(10, Math.min(natural[columns - 1] ?? 10, room - used))
       const row = (rowKey: string, row: string[], isHeader: boolean) => (
         <Box key={rowKey} gap={2}>
-          {widths.map((w, c) => (
-            <Box key={`${rowKey}-${c}`} width={w} flexShrink={0}>
-              <Text bold={isHeader} color={isHeader ? ACCENT : undefined} wrap="wrap">
-                {plainCell(row[c] ?? '')}
-              </Text>
-            </Box>
-          ))}
+          {widths.map((w, c) => {
+            const align = block.align[c]
+            return (
+              <Box key={`${rowKey}-${c}`} width={w} flexShrink={0} justifyContent={align ? JUSTIFY[align] : undefined}>
+                <Text bold={isHeader} color={isHeader ? ACCENT : undefined} wrap="wrap">
+                  {inline(`${rowKey}-${c}`, row[c] ?? '')}
+                </Text>
+              </Box>
+            )
+          })}
         </Box>
       )
       return (
         <Box key={id} flexDirection="column">
           {row(`${id}-head`, block.header, true)}
           <Text color={MUTED} dimColor>
-            {'─'.repeat(Math.min(width, widths.reduce((sum, w) => sum + w, 0) + 2 * (columns - 1)))}
+            {widths.map(w => '─'.repeat(w)).join('  ')}
           </Text>
           {block.rows.map((cells, r) => row(`${id}-row-${r}`, cells, false))}
         </Box>
@@ -280,7 +315,7 @@ export const register: Register = on => {
                 <Button
                   key={`open-${n}`}
                   plain
-                  label={`${String(n + 1).padStart(2)}  ${one.heading}`}
+                  label={`${String(n + 1).padStart(2)}  ${plainText(one.heading)}`}
                   autoFocus={n === 0 ? true : undefined}
                   onPress={() => go($, 'section', n)}
                 />

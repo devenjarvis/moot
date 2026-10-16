@@ -77,7 +77,7 @@ The gate between a finished implementation and a merged PR: validate → fix →
 
 A Claude Code mod (a plugin of function hooks) that replaces the built-in plan approval dialog with a review pane. When Claude calls `ExitPlanMode`, the pane opens on the plan's first section, and the built-in dialog does not show.
 
-- **Read** the plan section by section with **← Prev** / **Next →**, as an outline (`o`), or in full (`f`). Tables draw as aligned columns, and list items are spaced apart.
+- **Read** the plan section by section with **← Prev** / **Next →**, as an outline (`o`), or in full (`f`). Tables draw as aligned columns that keep each cell's bold, italic, strikethrough, `code` and links, and honour `:--:` alignment. Short one-line lists stay tight, while items with sub-points or code are spaced apart. Task boxes draw as ☐ and ☑.
 - **Note** any section, or the plan as a whole. Notes save as you type.
 - **Decide:** **1** approves, **2** sends your notes back to Claude as the `ExitPlanMode` error and keeps plan mode on, **3** (or Esc) falls back to the built-in dialog. Approving with unsent notes asks first. Pressing **2** with no notes opens a feedback box.
 
