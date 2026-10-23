@@ -261,7 +261,8 @@ local function agent_lines(r, key, folder_known, width, now)
 end
 
 -- Returns the lines to draw, the row each key from 1 to MAX_KEYS stands for,
--- and the line each key's agent starts on.
+-- the line each key's agent starts on, and the row drawn on each line, for
+-- the lines that show an agent.
 function M.render(rows, width, now, color)
   local cleaned = {}
   for i, r in ipairs(rows) do
@@ -276,7 +277,7 @@ function M.render(rows, width, now, color)
     }
   end
 
-  local lines, keys, key_lines = { cut(M.counts(cleaned), width) }, {}, {}
+  local lines, keys, key_lines, line_rows = { cut(M.counts(cleaned), width) }, {}, {}, {}
   local function add(text, at, symbol, state)
     if color and symbol then text = paint(text, at, symbol, state) end
     lines[#lines + 1] = text
@@ -297,10 +298,11 @@ function M.render(rows, width, now, color)
       end
       for _, l in ipairs(agent_lines(r, key, g.folder ~= nil, width, now)) do
         add(l.text, l.at, l.symbol, l.state)
+        line_rows[#lines] = r.source
       end
     end
   end
-  return lines, keys, key_lines
+  return lines, keys, key_lines, line_rows
 end
 
 return M

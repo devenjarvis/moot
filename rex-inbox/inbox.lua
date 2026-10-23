@@ -5,7 +5,8 @@ local ALL = rex.args.all == true
 local REDRAW_DELAY, TICK, SNAPSHOT_TICK, KEY_POLL = 0.1, 1, 30, 0.1
 local NOTICE_SECONDS = 8
 
--- Reads key presses from the pane's tty into a file that the script polls.
+-- Reads key presses and mouse clicks from the pane's tty into a file that
+-- the script polls.
 -- A rex do script cannot read its own input without blocking its handlers.
 -- Each read waits at most 0.1 s, so the reader sees the script exit within
 -- that time, then puts the tty back and removes the file. The first sleep
@@ -17,12 +18,14 @@ saved=$(stty -g <"$1") || exit 1
 stty -icanon -echo min 0 time 1 <"$1"
 while kill -0 "$3" 2>/dev/null; do dd bs=16 count=1 <"$1" >>"$2" 2>/dev/null; done
 stty "$saved" <"$1"
+printf '\033[?1000l\033[?1006l' >"$1"
 rm -f "$2"
 ]]
 
 local labels = {}
 local blocks = {}
 local keys = {}
+local clickable = {}
 local notice
 local pending
 
@@ -30,18 +33,22 @@ local function block_call(session_id, block_id, method)
   return rex.block.call(TERMINAL, method, { session_id = session_id, block_id = block_id })
 end
 
+-- Both readers return nil when the call fails, so the caller can keep the
+-- last known value.
 local function read_folder(session_id, block_id)
   local pwd = block_call(session_id, block_id, "pwd")
   if pwd and type(pwd.pwd) == "string" and pwd.pwd ~= "" then
     return model.folder(pwd.pwd)
   end
   local process = block_call(session_id, block_id, "process")
-  return model.folder(process and process.foreground and process.foreground.cwd)
+  if not process then return nil end
+  return model.folder(process.foreground and process.foreground.cwd)
 end
 
 local function read_title(session_id, block_id)
   local title = block_call(session_id, block_id, "title")
-  return title and title.title or ""
+  if not title then return nil end
+  return title.title or ""
 end
 
 local function read_labels()
@@ -68,8 +75,8 @@ local function load_block(into, session_id, block_id, known, reread)
   end
   local b = known or { session_id = session_id }
   b.records = records
-  if reread or not b.title then b.title = read_title(session_id, block_id) end
-  if reread or not b.folder then b.folder = read_folder(session_id, block_id) end
+  if reread or not b.title then b.title = read_title(session_id, block_id) or b.title or "" end
+  if reread or not b.folder then b.folder = read_folder(session_id, block_id) or b.folder or "" end
   into[block_id] = b
 end
 
@@ -115,14 +122,18 @@ local function draw()
     end
   end
 
-  local lines, key_lines
-  lines, keys, key_lines = model.render(rows, width, os.time(), true)
+  local lines, key_lines, line_rows
+  lines, keys, key_lines, line_rows = model.render(rows, width, os.time(), true)
   local shift = 0
   if notice and os.time() < notice.expires then
     table.insert(lines, 2, "\27[2m" .. model.cut(notice.text, width) .. "\27[0m")
     shift = 1
   else
     notice = nil
+  end
+  clickable = {}
+  for i, row in pairs(line_rows) do
+    if not height or i + shift <= height then clickable[i + shift] = row end
   end
   if height and #lines > height then
     for i = #lines, height + 1, -1 do lines[i] = nil end
@@ -189,10 +200,16 @@ local function start_key_reader()
   return io.open(path, "rb")
 end
 
+-- Clicks arrive as SGR mouse reports, ESC [ < button ; column ; row M, and
+-- are taken out before digits are read as keys.
 local function read_keys(file)
   local data = file:read("*a")
   if not data or data == "" then return end
-  data = data:gsub("\27%[[%d;?]*[%a~]", ""):gsub("\27O%a", "")
+  for button, _, y, kind in data:gmatch("\27%[<(%d+);(%d+);(%d+)([Mm])") do
+    local row = clickable[tonumber(y)]
+    if kind == "M" and button == "0" and row then jump(row) end
+  end
+  data = data:gsub("\27%[<[%d;]*[Mm]", ""):gsub("\27%[[%d;?]*[%a~]", ""):gsub("\27O%a", "")
   for digit in data:gmatch("%d") do
     local row = keys[tonumber(digit)]
     if row then jump(row) end
@@ -263,5 +280,7 @@ rex.every(TICK, schedule)
 
 local key_file = start_key_reader()
 if key_file then
+  io.write("\27[?1000h\27[?1006h")
+  io.flush()
   rex.every(KEY_POLL, function() read_keys(key_file) end)
 end

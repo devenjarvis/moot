@@ -182,6 +182,16 @@ eq(kline[1], 3, "key 1 line")
 eq(kline[2], 6, "key 2 line after a blank line and a header")
 assert(klines[kline[2]]:find("readme", 1, true), "key 2 line holds its agent")
 
+-- render: line_rows maps both lines of an agent, and nothing else
+local llines, _, _, line_rows = M.render({
+  { session = "api", folder = "app", title = "login", record = rec("blocked", "2026-10-23T09:57:00Z", { msg = "approve" }) },
+}, 40, NOW)
+eq(#llines, 4, "counts, header, two agent lines")
+eq(line_rows[1], nil, "counts line has no agent")
+eq(line_rows[2], nil, "header has no agent")
+eq(line_rows[3].title, "login", "first agent line")
+eq(line_rows[4].title, "login", "message line")
+
 -- render: only nine agents get keys
 local many = {}
 for i = 1, 11 do many[i] = srow("s", "f", "t" .. i, "working", string.format("2026-10-23T09:%02d:00Z", i)) end
