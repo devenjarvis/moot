@@ -97,6 +97,27 @@ It polls every 60 s while a PR is open and every 3 min otherwise, and 5 s after 
 
 It needs [`gh`](https://cli.github.com), signed in. Without it, or outside a GitHub repo, the mod shows nothing.
 
+### `rex-inbox`
+
+A [Rex](https://www.superlogical.com/rex) script, not a Claude Code plugin. It lists every Claude Code agent in every Rex session in one pane, with the agents that need you at the top. It is made to sit in a narrow pane at the side.
+
+```bash
+rex do rex-inbox/inbox.lua --all
+```
+
+Run it in any Rex pane. It keeps the list current until you press Ctrl-C. `--all` is required: without it, the script hears only its own session.
+
+- **Groups:** one group per session, headed by the session label and the agent's folder. Groups go in order of their most urgent agent. A session with agents in several folders names the folder on each agent instead.
+- **Each agent** takes two lines: a number key, a state symbol, the terminal title, and how long ago the status changed, then the status message. A `blocked` agent also shows what it waits for: `[permission]`, `[question]`, or `[auth]`.
+- **Order:** `▲ blocked`, then `✗ error`, then `✓ done`, then `◷ working`, then `○ idle`. Within `blocked`, `error`, and `done`, the oldest comes first. Within `working` and `idle`, the newest comes first.
+- **Header:** counts per state, such as `2 blocked · 1 done · 4 working`.
+- **Jump:** press `1`–`9` to go to that agent: the script focuses its pane and switches Rex to its session. Switching needs Remote Control, which you turn on in Rex's Settings under Rex Server. While it is off, the inbox shows a notice instead.
+- **Other programs:** add `all=true` to list status from every program, not only Claude Code: `rex do rex-inbox/inbox.lua --all all=true`.
+
+It reads the [Program Status](https://www.superlogical.com/rex/docs/build/program-status) records that Claude Code reports to Rex, so it shows only agents that run inside Rex. Lines never wrap: each is cut to the pane's width, and the list redraws within a second of a resize.
+
+Test the model outside Rex with `luajit rex-inbox/test/model_test.lua`.
+
 ## Installation
 
 Clone the repo and add the skill directories to your Claude Code configuration:
@@ -153,6 +174,10 @@ moot/
       pr-status.test.tsx     # Tests for the hooks and the pane
     types/index.d.ts         # The mod's $.state contract
     tsconfig.json            # Extends the types Claude Code writes on load
+  rex-inbox/
+    inbox.lua                # Rex script: snapshots, events, key reader, drawing
+    model.lua                # Picking, sorting, grouping, and drawing rows (no Rex calls)
+    test/model_test.lua      # Tests for the model, run with luajit
 ```
 
 ## License
