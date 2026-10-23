@@ -105,6 +105,38 @@ When every PR has merged or closed, the pane shows the final state for 3 min, th
 
 It needs [`gh`](https://cli.github.com), signed in. Without it, or outside a GitHub repo, the mod shows nothing.
 
+### `rex-inbox`
+
+A [Rex](https://www.superlogical.com/rex) script, not a Claude Code plugin. It lists every Claude Code agent in every Rex session in one pane, with the agents that need you at the top. It is made to sit in a narrow pane at the side.
+
+To keep an inbox pane on the left of every tab, in every session:
+
+```bash
+rex do rex-inbox/panes.lua
+```
+
+This starts a watcher in the background and returns. The watcher adds a pane about 36 columns wide, labeled `inbox`, to every tab that lacks one. It does the same for each new tab and new session while it runs. If you close an inbox pane, the watcher leaves that tab without one until the watcher restarts. When a tab has only its inbox pane left, the watcher closes the tab. Running the command again while the watcher runs does nothing, so it is safe in a shell startup file. Stop it with `rex do rex-inbox/panes.lua stop=true`. The watcher does not survive a restart of the Rex server or your Mac.
+
+To run one inbox in the current pane instead:
+
+```bash
+rex do rex-inbox/inbox.lua --all
+```
+
+It keeps the list current until you press Ctrl-C. `--all` is required: without it, the script hears only its own session.
+
+- **Groups:** one group per session, headed by the session label and the agent's folder. Groups go in order of their most urgent agent. A session with agents in several folders names the folder on each agent instead.
+- **Each agent** takes two lines: a number key, a state symbol, the terminal title, and how long ago the status changed, then the status message. A `blocked` agent also shows what it waits for: `[permission]`, `[question]`, or `[auth]`.
+- **Order:** `▲ blocked`, then `✗ error`, then `✓ done`, then `◷ working`, then `○ idle`. Within `blocked`, `error`, and `done`, the oldest comes first. Within `working` and `idle`, the newest comes first.
+- **Header:** counts per state, such as `2 blocked · 1 done · 4 working`.
+- **Jump:** click an agent, or press its number key, to go to it. The script focuses the agent's pane and switches Rex to its session. Only the first nine agents on screen get a number key. Switching sessions needs Remote Control, which you turn on in Rex's Settings under Rex Server. While it is off, the inbox shows a notice instead, and only the pane focus inside the other session changes.
+- **Keys and clicks:** a `rex do` script cannot read its own input without stalling, so the inbox starts a small helper. The helper turns off line mode and echo on the pane's terminal. The inbox draws on the alternate screen with the cursor hidden, and turns on mouse reporting and resize reports. The helper copies key presses, clicks, and resize reports to a private temporary file, which the inbox reads. A resize redraws the inbox within 0.1 s, and each redraw writes only the lines that changed, as one synchronized frame. Within 0.1 s of the inbox exiting, the helper turns those modes off and deletes the file, and your shell restores line mode. Keys typed within that 0.1 s can be lost.
+- **Other programs:** add `all=true` to list status from every program, not only Claude Code: `rex do rex-inbox/inbox.lua --all all=true`.
+
+It reads the [Program Status](https://www.superlogical.com/rex/docs/build/program-status) records that Claude Code reports to Rex, so it shows only agents that run inside Rex. Lines never wrap: each is cut to the pane's width.
+
+Test the model outside Rex with `luajit rex-inbox/test/model_test.lua`.
+
 ## Installation
 
 Clone the repo and add the skill directories to your Claude Code configuration:
@@ -161,6 +193,11 @@ moot/
       pr-status.test.tsx     # Tests for the hooks and the pane
     types/index.d.ts         # The mod's $.state contract
     tsconfig.json            # Extends the types Claude Code writes on load
+  rex-inbox/
+    inbox.lua                # Rex script: snapshots, events, key reader, drawing
+    panes.lua                # Background watcher that keeps an inbox pane on the left of every tab
+    model.lua                # Picking, sorting, grouping, and drawing rows (no Rex calls)
+    test/model_test.lua      # Tests for the model, run with luajit
 ```
 
 ## License
