@@ -135,8 +135,23 @@ local function is_control(cp)
     or (cp >= 0x2066 and cp <= 0x2069)
 end
 
+-- Emoji below U+1F300 that terminals draw two columns wide.
+local WIDE_EMOJI = {}
+for _, cp in ipairs({
+  0x231A, 0x231B, 0x23E9, 0x23EA, 0x23EB, 0x23EC, 0x23F0, 0x23F3, 0x25FD, 0x25FE,
+  0x2614, 0x2615, 0x2648, 0x2649, 0x264A, 0x264B, 0x264C, 0x264D, 0x264E, 0x264F,
+  0x2650, 0x2651, 0x2652, 0x2653, 0x267F, 0x2693, 0x26A1, 0x26AA, 0x26AB, 0x26BD,
+  0x26BE, 0x26C4, 0x26C5, 0x26CE, 0x26D4, 0x26EA, 0x26F2, 0x26F3, 0x26F5, 0x26FA,
+  0x26FD, 0x2705, 0x270A, 0x270B, 0x2728, 0x274C, 0x274E, 0x2753, 0x2754, 0x2755,
+  0x2757, 0x2795, 0x2796, 0x2797, 0x27B0, 0x27BF, 0x2B1B, 0x2B1C, 0x2B50, 0x2B55,
+  0x1F004, 0x1F0CF, 0x1F18E,
+}) do WIDE_EMOJI[cp] = true end
+
 local function cp_width(cp)
   if is_control(cp) then return 0 end
+  if WIDE_EMOJI[cp] or (cp >= 0x1F191 and cp <= 0x1F19A) or (cp >= 0x1F200 and cp <= 0x1F2FF) then
+    return 2
+  end
   if (cp >= 0x1100 and cp <= 0x115F) or (cp >= 0x2E80 and cp <= 0xA4CF)
     or (cp >= 0xAC00 and cp <= 0xD7A3) or (cp >= 0xF900 and cp <= 0xFAFF)
     or (cp >= 0xFE30 and cp <= 0xFE4F) or (cp >= 0xFF00 and cp <= 0xFF60)
@@ -245,14 +260,15 @@ local function agent_lines(r, key, folder_known, width, now)
   return out
 end
 
--- Returns the lines to draw and, for keys 1 to MAX_KEYS, the row each key
--- stands for.
+-- Returns the lines to draw, the row each key from 1 to MAX_KEYS stands for,
+-- and the line each key's agent starts on.
 function M.render(rows, width, now, color)
   local cleaned = {}
   for i, r in ipairs(rows) do
     cleaned[i] = {
       source = r,
       record = r.record,
+      block_id = r.block_id,
       session_id = r.session_id,
       session = clean(r.session),
       folder = clean(r.folder),
@@ -260,7 +276,7 @@ function M.render(rows, width, now, color)
     }
   end
 
-  local lines, keys = { cut(M.counts(cleaned), width) }, {}
+  local lines, keys, key_lines = { cut(M.counts(cleaned), width) }, {}, {}
   local function add(text, at, symbol, state)
     if color and symbol then text = paint(text, at, symbol, state) end
     lines[#lines + 1] = text
@@ -276,6 +292,7 @@ function M.render(rows, width, now, color)
       local key = " "
       if #keys < MAX_KEYS then
         keys[#keys + 1] = r.source
+        key_lines[#keys] = #lines + 1
         key = tostring(#keys)
       end
       for _, l in ipairs(agent_lines(r, key, g.folder ~= nil, width, now)) do
@@ -283,7 +300,7 @@ function M.render(rows, width, now, color)
       end
     end
   end
-  return lines, keys
+  return lines, keys, key_lines
 end
 
 return M

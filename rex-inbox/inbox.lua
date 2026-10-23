@@ -7,11 +7,14 @@ local NOTICE_SECONDS = 8
 
 -- Reads key presses from the pane's tty into a file that the script polls.
 -- A rex do script cannot read its own input without blocking its handlers.
--- The reader waits at most half a second per read, so it notices when the
--- script has exited, then puts the tty back and removes the file.
+-- Each read waits at most 0.1 s, so the reader sees the script exit within
+-- that time, then puts the tty back and removes the file. The first sleep
+-- lets a reader left by an earlier run in this pane restore the tty before
+-- this one saves it.
 local KEY_READER = [[
+sleep 0.2
 saved=$(stty -g <"$1") || exit 1
-stty -icanon -echo min 0 time 5 <"$1"
+stty -icanon -echo min 0 time 1 <"$1"
 while kill -0 "$3" 2>/dev/null; do dd bs=16 count=1 <"$1" >>"$2" 2>/dev/null; done
 stty "$saved" <"$1"
 rm -f "$2"
@@ -50,18 +53,23 @@ local function read_labels()
 end
 
 -- Reads one block's records into `into`. Title and folder are read only for a
--- block that has a matching record, and only when `known` lacks them.
-local function load_block(into, session_id, block_id, known)
+-- block that has a matching record, and only when `known` lacks them or
+-- `reread` is set. If the read fails, `known` stays as it was.
+local function load_block(into, session_id, block_id, known, reread)
   local status = block_call(session_id, block_id, "program_status")
-  local records = status and status.records
+  if not status then
+    into[block_id] = known
+    return
+  end
+  local records = status.records
   if type(records) ~= "table" or not model.pick(records, ALL) then
     into[block_id] = nil
     return
   end
   local b = known or { session_id = session_id }
   b.records = records
-  b.title = b.title or read_title(session_id, block_id)
-  b.folder = b.folder or read_folder(session_id, block_id)
+  if reread or not b.title then b.title = read_title(session_id, block_id) end
+  if reread or not b.folder then b.folder = read_folder(session_id, block_id) end
   into[block_id] = b
 end
 
@@ -71,9 +79,15 @@ local function snapshot()
   local fresh = {}
   for session_id in pairs(fresh_labels) do
     local list = rex.call("session.list_blocks", { session_id = session_id })
-    for _, b in ipairs(list and list.blocks or {}) do
-      if b.creator_name == TERMINAL then
-        load_block(fresh, session_id, b.block_id)
+    if list then
+      for _, b in ipairs(list.blocks or {}) do
+        if b.creator_name == TERMINAL then
+          load_block(fresh, session_id, b.block_id, blocks[b.block_id], true)
+        end
+      end
+    else
+      for block_id, b in pairs(blocks) do
+        if b.session_id == session_id then fresh[block_id] = b end
       end
     end
   end
@@ -101,15 +115,20 @@ local function draw()
     end
   end
 
-  local lines
-  lines, keys = model.render(rows, width, os.time(), true)
+  local lines, key_lines
+  lines, keys, key_lines = model.render(rows, width, os.time(), true)
+  local shift = 0
   if notice and os.time() < notice.expires then
     table.insert(lines, 2, "\27[2m" .. model.cut(notice.text, width) .. "\27[0m")
+    shift = 1
   else
     notice = nil
   end
   if height and #lines > height then
     for i = #lines, height + 1, -1 do lines[i] = nil end
+    for n = #keys, 1, -1 do
+      if key_lines[n] + shift > height then keys[n] = nil end
+    end
   end
 
   -- Each line clears its row before writing, rather than after: a line that
@@ -138,8 +157,9 @@ local function jump(row)
     if b.block_id == block_id then window_id = b.window_id end
   end
   rex.call("session.focus_block", { session_id = session_id, block_id = block_id })
-  local ok, err = pcall(rex.client.queue, "session.select", { session_id = session_id, window_id = window_id })
-  if not ok then
+  local ok, result, err = pcall(rex.client.queue, "session.select", { session_id = session_id, window_id = window_id })
+  if not ok then err = result end
+  if not ok or (result == nil and err ~= nil) then
     err = tostring(err)
     if err:find("Remote Control", 1, true) then
       err = "Turn on Remote Control in Rex Settings to jump"
@@ -158,12 +178,14 @@ local function start_key_reader()
   local tty = ps and ps.ok and ps.stdout:gsub("%s+", "")
   if not tty or tty == "" or tty:find("?", 1, true) then return nil end
 
-  local path = (os.getenv("TMPDIR") or "/tmp/"):gsub("/*$", "/") .. "rex-inbox-keys-" .. pid
-  local w = io.open(path, "wb")
-  if not w then return nil end
-  w:close()
+  local made = rex.exec{ "mktemp", "-t", "rex-inbox-keys" }
+  local path = made and made.ok and made.stdout:gsub("%s+$", "")
+  if not path or path == "" then return nil end
   local h = rex.exec.start({ "sh", "-c", KEY_READER, "sh", "/dev/" .. tty, path, tostring(pid) }, { detach = true })
-  if not h then return nil end
+  if not h then
+    os.remove(path)
+    return nil
+  end
   return io.open(path, "rb")
 end
 

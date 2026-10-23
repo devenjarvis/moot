@@ -156,6 +156,32 @@ eq(mixed[2], "▲ api", "mixed folders leave the header bare")
 assert(mixed[3]:find("app · login", 1, true), "folder before title: " .. mixed[3])
 assert(mixed[4]:find("app-wt · tests", 1, true), "folder before title: " .. mixed[4])
 
+-- render: sessions with the same label stay apart
+local twins = M.render({
+  { session = "work", session_id = "id-1", folder = "a", title = "one", record = rec("done", "2026-10-23T09:00:00Z") },
+  { session = "work", session_id = "id-2", folder = "b", title = "two", record = rec("done", "2026-10-23T09:10:00Z") },
+}, 40, NOW)
+eq(twins[2], "✓ work · a", "first session")
+eq(twins[5], "✓ work · b", "second session with the same label")
+
+-- render: ties break on block_id, so equal rows keep their order
+local function tied(id)
+  return { session = "s", block_id = id, folder = "f", title = "t", record = rec("working", "2026-10-23T09:00:00Z") }
+end
+local _, tkeys = M.render({ tied("block:b"), tied("block:a") }, 40, NOW)
+eq(tkeys[1].block_id .. tkeys[2].block_id, "block:ablock:b", "tie-break on block_id")
+local _, rkeys = M.render({ tied("block:a"), tied("block:b") }, 40, NOW)
+eq(rkeys[1].block_id .. rkeys[2].block_id, "block:ablock:b", "same order from the other input order")
+
+-- render: key_lines gives the line each key's agent starts on
+local klines, kkeys, kline = M.render({
+  srow("api", "app", "login", "blocked", "2026-10-23T09:57:00Z"),
+  srow("docs", "moot", "readme", "done", "2026-10-23T09:50:00Z"),
+}, 40, NOW)
+eq(kline[1], 3, "key 1 line")
+eq(kline[2], 6, "key 2 line after a blank line and a header")
+assert(klines[kline[2]]:find("readme", 1, true), "key 2 line holds its agent")
+
 -- render: only nine agents get keys
 local many = {}
 for i = 1, 11 do many[i] = srow("s", "f", "t" .. i, "working", string.format("2026-10-23T09:%02d:00Z", i)) end
@@ -185,6 +211,8 @@ eq(M.cut("abc", 4), "abc", "cut keeps short text")
 eq(M.width("ab"), 2, "ascii width")
 eq(M.width("üé"), 2, "utf-8 width")
 eq(M.width("日本"), 4, "wide characters take two columns")
+eq(M.width("✅⭐"), 4, "emoji below U+1F300 take two columns")
+eq(M.width("✓✗◷▲○"), 5, "state symbols take one column")
 local ll = M.render({ long }, 40, NOW)
 eq(M.width(ll[3]), 40, "a long title line fills the width")
 assert(ll[3]:find("1m$"), "age survives a long title: " .. ll[3])
@@ -192,6 +220,11 @@ eq(M.width(ll[4]), 40, "a long message line fills the width")
 
 -- render: control characters never reach the terminal
 local evil = { session = "s\27]0;x\7", folder = "f", title = "x\27[2Jy", record = rec("idle", "2026-10-23T09:00:00Z", { msg = "a\nb" }) }
+local evil_kind = { session = "s", folder = "f", title = "", record = rec("blocked", "2026-10-23T09:00:00Z", { kind = "q\27[31m", msg = "m" }) }
+for _, l in ipairs(M.render({ evil_kind }, 200, NOW)) do
+  assert(not l:find("[%c]"), "control characters stripped from kind: " .. l)
+end
+eq(M.render({ evil_kind }, 40, NOW)[3], "  1 ▲ [q[31m] m                       1h", "blocked row with no title shows kind and message on one line")
 for _, l in ipairs(M.render({ evil }, 200, NOW)) do
   assert(not l:find("[%c]"), "control characters stripped: " .. l)
 end
