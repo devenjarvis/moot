@@ -22,3 +22,7 @@ test('nextDelay waits for the reset when the budget is low', async () => {
   expect(nextDelay({ ...base, rate: { remaining: 500, resetAt } })).toBe(60_000)
   expect(nextDelay({ ...base, hasOpen: false, rate: { remaining: 0, resetAt } })).toBe(1_800_000)
 })
+
+test('nextDelay waits 180 s when the reset time is unknown', async () => {
+  expect(nextDelay({ ...base, rate: { remaining: 0, resetAt: '' } })).toBe(180_000)
+})

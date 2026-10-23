@@ -134,8 +134,13 @@ async function graphql($: EngineInterface, root: string, info: RepoInfo, text: s
   return res
 }
 
-const failure = (res: { stderr: string; stdout: string }) =>
-  new Error(firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed')
+const failure = (res: { stderr: string; stdout: string }, rate: RateLimit | null = null) => {
+  const message = firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed'
+  const isLimited = /rate limit/i.test(`${res.stderr}\n${res.stdout}`)
+  return Object.assign(new Error(message), { rate: isLimited ? lowerRate(rate, { remaining: 0, resetAt: '' }) : rate })
+}
+
+const rateOf = (err: unknown): RateLimit | null => (err as { rate?: RateLimit | null })?.rate ?? null
 
 async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]) {
   const withStack = stackFields.get(root) ?? true
@@ -154,7 +159,7 @@ async function query($: EngineInterface, root: string, info: RepoInfo, heads: st
   const numbers = withStack ? stackMembers(json) : []
   if (numbers.length > 0) {
     const more = await graphql($, root, info, buildMemberQuery(numbers), numbers.map((number, i) => [`p${i}`, number]))
-    if (more.exitCode !== 0) throw failure(more)
+    if (more.exitCode !== 0) throw failure(more, rate)
     const members = JSON.parse(more.stdout)
     rate = lowerRate(rate, members?.data?.rateLimit ?? null)
     json = withMembers(json, members)
@@ -173,7 +178,12 @@ async function fetchRoot($: EngineInterface, root: string, names: string[]) {
   for (let round = 0; round <= STACK_ROUNDS && heads.length + bases.length > 0; round++) {
     heads.forEach(name => askedHeads.add(name))
     bases.forEach(name => askedBases.add(name))
-    const found = await query($, root, info, heads, bases)
+    let found: Awaited<ReturnType<typeof query>>
+    try {
+      found = await query($, root, info, heads, bases)
+    } catch (err) {
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { rate: lowerRate(rate, rateOf(err)) })
+    }
     rate = lowerRate(rate, found.rate)
     for (const pr of found.prs) {
       const isFound = round > 0 || !heads.includes(pr.head)
@@ -196,10 +206,8 @@ function refreshSoon($: EngineInterface) {
 }
 
 function refresh($: EngineInterface, isTimed = false): Promise<void> {
-  if (!isTimed) {
-    wantFull = true
-    quiet = 0
-  }
+  if (!isTimed) quiet = 0
+  if (!isTimed && !(inFlight && isFullRun)) wantFull = true
   // A timed run may have skipped finished branches, so a trigger that lands during one runs again after it.
   if (inFlight && wantFull && !isFullRun) return inFlight.then(() => refresh($))
   inFlight ??= refreshNow($)
@@ -245,6 +253,7 @@ async function refreshNow($: EngineInterface) {
       fetched++
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
+      rate = lowerRate(rate, rateOf(err))
       const failedRepo = repoInfos.get(root)?.repo ?? repos[root]
       kept.push(...(previous?.groups.flatMap(group => group.prs).filter(pr => pr.repo === failedRepo) ?? []))
     }

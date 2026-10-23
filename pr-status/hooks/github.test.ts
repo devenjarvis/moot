@@ -151,6 +151,12 @@ test('withMembers fills light stack entries so parsePrs reads them as before', a
   expect(parsePrs(withMembers(light(RESPONSE), members), 'o/r', ['o/r'])).toEqual(parsePrs(RESPONSE, 'o/r', ['o/r']))
 })
 
+test('withMembers drops a stack entry whose member did not come back', async () => {
+  const members = { data: { repository: { p0: STACK_ENTRIES[0]!.pullRequest, p1: null } } }
+  const prs = parsePrs(withMembers(light(RESPONSE), members), 'o/r', ['o/r'])
+  expect(prs.map(one => one.number).sort()).toEqual([101, 102])
+})
+
 test('parsePrs reads a native stack, drops fork PRs and counts checks', async () => {
   const prs = parsePrs(RESPONSE, 'o/r', ['o/r'])
   expect(prs.map(one => one.number).sort()).toEqual([101, 102, 103])

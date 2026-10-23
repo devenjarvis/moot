@@ -8,7 +8,10 @@ export type DelayInput = { isDismissed: boolean; hasOpen: boolean; quiet: number
 
 export function nextDelay({ isDismissed, hasOpen, quiet, rate, now }: DelayInput): number | null {
   if (isDismissed) return null
-  if (rate && rate.remaining < LOW_BUDGET) return Math.max(IDLE_MS, Date.parse(rate.resetAt) - now)
+  if (rate && rate.remaining < LOW_BUDGET) {
+    const wait = Date.parse(rate.resetAt) - now
+    return Number.isFinite(wait) ? Math.max(IDLE_MS, wait) : IDLE_MS
+  }
   if (!hasOpen) return IDLE_MS
   return Math.min(ACTIVE_MS * 2 ** quiet, IDLE_MS)
 }

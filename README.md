@@ -98,7 +98,7 @@ It refreshes 5 s after Claude runs `gh pr`, `gh stack` or `git push`, when the s
 - **While a PR is open**, it polls after 60 s. Each poll that finds nothing changed doubles the wait, up to 3 min. A change, or any refresh not set off by the timer, sets it back to 60 s.
 - **With no open PR**, it polls every 3 min.
 - **Finished branches:** a timed poll skips a branch when every PR in its stack has merged or closed, and keeps showing their final state. A refresh not set off by the timer checks every branch.
-- **Rate limit:** each query reads GitHub's remaining GraphQL budget. When fewer than 500 points remain, the next timed poll waits until the budget resets, and at least 3 min.
+- **Rate limit:** each query reads GitHub's remaining GraphQL budget. When fewer than 500 points remain, the next timed poll waits until the budget resets, and at least 3 min. A rate-limit error also makes it wait at least 3 min.
 - **Closed pane:** if you close the pane, timed polling stops. The pane stays closed until a new PR opens; a notice says `/prs` brings it back.
 
 When every PR has merged or closed, the pane stays and shows the final state.

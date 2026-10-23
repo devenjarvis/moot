@@ -427,7 +427,7 @@ test('a timed refresh skips a branch whose PRs have all finished', async ($, on)
   await clock.advance(60_000)
   const calls = graphqlCalls(world).length
   await clock.advance(180_000)
-  expect(graphqlCalls(world).slice(calls).some(argv => argv.includes('b0=feat-a'))).toBe(false)
+  expect(graphqlCalls(world).length).toBe(calls)
 
   const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
   expect(await ui.find({ type: 'Text', text: 'merged' })).toBeDefined()
@@ -475,4 +475,34 @@ test('a low rate-limit budget waits for the reset', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: 'gh pr view' } as never)
   await clock.advance(5_000)
   expect(graphqlCalls(world).length).toBe(calls + 2)
+})
+
+test('a rate-limit error waits at least 3 min before the next timed refresh', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  world.graphql = { exitCode: 1, stdout: '', stderr: 'GraphQL: API rate limit exceeded for user ID 1.' }
+  await clock.advance(60_000)
+  const calls = graphqlCalls(world).length
+  await clock.advance(179_000)
+  expect(graphqlCalls(world).length).toBe(calls)
+  await clock.advance(1_000)
+  expect(graphqlCalls(world).length).toBe(calls + 1)
+})
+
+test('a low budget read before a failed member query still waits for the reset', async ($, on) => {
+  const low = JSON.stringify({
+    data: {
+      repository: { b0: { nodes: [node(102, 'feat-2', 'feat-1', { stack: lightStack(STACK), stackEntry: { position: 2 } })] } },
+      rateLimit: { remaining: 100, resetAt: '1970-01-01T00:30:00Z' },
+    },
+  })
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-2', 'main')]) })
+  world.branch = 'feat-2'
+  await start($, clock)
+  world.graphql = { exitCode: 0, stdout: low }
+  world.memberError = 'HTTP 502: Bad Gateway'
+  await clock.advance(60_000)
+  const calls = graphqlCalls(world).length
+  await clock.advance(28 * 60_000)
+  expect(graphqlCalls(world).length).toBe(calls)
 })
