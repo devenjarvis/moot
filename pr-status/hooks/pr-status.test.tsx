@@ -56,6 +56,7 @@ type World = {
   then?: World['graphql']
   members: Node[]
   memberError?: string
+  focused?: boolean
   calls: string[][]
   opens: string[]
   panes: string[]
@@ -100,7 +101,7 @@ function setup($: Engine, on: On, graphql: World['graphql'] = { exitCode: 0, std
     world.panes = world.panes.filter(id => id !== e.id)
     return { value: undefined }
   })
-  on('ui.panes', () => ({ value: world.panes.map(id => ({ id, title: 'Pull requests', isFocused: false })) as never }))
+  on('ui.panes', () => ({ value: world.panes.map(id => ({ id, title: 'Pull requests', isFocused: Boolean(world.focused) })) as never }))
   on('tool.call', () => ({ result: {} as never }))
   return { world, clock }
 }
@@ -523,4 +524,35 @@ test('a rate-limited member query keeps the reset time the head query read', asy
   const calls = graphqlCalls(world).length
   await clock.advance(28 * 60_000)
   expect(graphqlCalls(world).length).toBe(calls)
+})
+
+test('the pane closes itself once every PR has finished, and reopens for a new PR', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  world.graphql = { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main', { state: 'MERGED' })]) }
+  await clock.advance(60_000)
+  expect(world.panes).toEqual(['pr-status'])
+  await clock.advance(179_000)
+  expect(world.panes).toEqual(['pr-status'])
+  await clock.advance(1_000)
+  expect(world.panes).toEqual([])
+
+  world.graphql = { exitCode: 0, stdout: reply([node(8, 'feat-a', 'main')]) }
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' } as never)
+  await clock.advance(5_000)
+  expect(world.panes).toEqual(['pr-status'])
+  expect(world.opens).toEqual(['pr-status', 'pr-status'])
+})
+
+test('the pane stays open while it has focus after every PR has finished', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  world.graphql = { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main', { state: 'MERGED' })]) }
+  await clock.advance(60_000)
+  world.focused = true
+  await clock.advance(180_000)
+  expect(world.panes).toEqual(['pr-status'])
+  world.focused = false
+  await clock.advance(180_000)
+  expect(world.panes).toEqual([])
 })

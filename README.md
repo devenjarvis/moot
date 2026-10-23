@@ -101,7 +101,7 @@ It refreshes 5 s after Claude runs `gh pr`, `gh stack` or `git push`, when the s
 - **Rate limit:** each query reads GitHub's remaining GraphQL budget. When fewer than 500 points remain, the next timed poll waits until the budget resets, and at least 3 min. A rate-limit error also makes it wait at least 3 min.
 - **Closed pane:** if you close the pane, timed polling stops. The pane stays closed until a new PR opens; a notice says `/prs` brings it back.
 
-When every PR has merged or closed, the pane stays and shows the final state.
+When every PR has merged or closed, the pane shows the final state for 3 min, then closes itself, unless it has focus. It opens again when a new PR opens.
 
 It needs [`gh`](https://cli.github.com), signed in. Without it, or outside a GitHub repo, the mod shows nothing.
 
