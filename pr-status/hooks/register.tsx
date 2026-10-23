@@ -216,12 +216,22 @@ async function refreshNow($: EngineInterface) {
   schedule($, (await read($, dismissed)) ? null : IDLE_MS)
   const tracked = await read($, branches)
   if (tracked.length === 0) return
-  const roots = new Map<string, string[]>()
-  for (const one of tracked) roots.set(one.root, [...(roots.get(one.root) ?? []), one.branch])
 
   const previous = await read($, snapshot)
-  const prs = new Map<string, Pr>()
+  const finished = (one: TrackedBranch) => {
+    const repo = previous?.repos[one.root]
+    const group = previous?.groups.find(group => group.prs.some(pr => pr.repo === repo && pr.head === one.branch))
+    return group?.prs.every(pr => pr.state !== 'OPEN') ? group.prs : null
+  }
+  const roots = new Map<string, string[]>()
   const kept: Pr[] = []
+  for (const one of tracked) {
+    const done = isFullRun ? null : finished(one)
+    if (done) kept.push(...done)
+    else roots.set(one.root, [...(roots.get(one.root) ?? []), one.branch])
+  }
+
+  const prs = new Map<string, Pr>()
   const repos: Record<string, string> = { ...previous?.repos }
   let error: string | null = null
   let rate: RateLimit | null = null

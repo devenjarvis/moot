@@ -419,3 +419,42 @@ test('an unchanged open PR backs off to 180 s', async ($, on) => {
   await clock.advance(60_000)
   expect(at(9)).toBe(true)
 })
+
+test('a timed refresh skips a branch whose PRs have all finished', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  world.graphql = { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main', { state: 'MERGED' })]) }
+  await clock.advance(60_000)
+  const calls = graphqlCalls(world).length
+  await clock.advance(180_000)
+  expect(graphqlCalls(world).slice(calls).some(argv => argv.includes('b0=feat-a'))).toBe(false)
+
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: 'merged' })).toBeDefined()
+  const before = graphqlCalls(world).length
+  await ui.press({ key: 'refresh' })
+  expect(graphqlCalls(world).slice(before).some(argv => argv.includes('b0=feat-a'))).toBe(true)
+  await ui.unmount()
+})
+
+test('a timed refresh keeps querying a merged branch with an open PR above it in its stack', async ($, on) => {
+  const stack = {
+    ...STACK,
+    size: 2,
+    entries: {
+      nodes: [
+        { position: 1, pullRequest: node(101, 'feat-1', 'main', { state: 'MERGED' }) },
+        { position: 2, pullRequest: node(102, 'feat-2', 'feat-1') },
+      ],
+    },
+  }
+  const { world, clock } = setup($, on)
+  world.branch = 'feat-1'
+  world.graphql = { exitCode: 0, stdout: reply([node(101, 'feat-1', 'main', { state: 'MERGED', stack: lightStack(stack), stackEntry: { position: 1 } })]) }
+  world.members = stack.entries.nodes.map(entry => entry.pullRequest)
+  await start($, clock)
+  expect(world.opens).toEqual(['pr-status'])
+  const calls = graphqlCalls(world).length
+  await clock.advance(60_000)
+  expect(graphqlCalls(world).slice(calls).some(argv => argv.includes('b0=feat-1'))).toBe(true)
+})
