@@ -93,7 +93,15 @@ A mod that shows the GitHub PRs of the session's branches in a pane. The pane op
 - **Merging a stack:** merging a PR in a GitHub stack also merges the open PRs below it, so their problems count as its own. A PR whose own state is clean names the lowest problem below it in a dimmed shade of the problem's color (`↓ #19 review needed`), while its dot keeps its own state's color, or reads `ready · with #19` or `ready · merges #19–#21` when the whole range can land. In a stack without native stack data, you must merge from the bottom up, so the label reads `blocked by #N` until the PR below merges.
 - **Act:** `r` refreshes; pressing a PR's title opens it in the browser.
 
-It polls every 60 s while a PR is open and every 3 min otherwise, and 5 s after Claude runs `gh pr`, `gh stack` or `git push`. When every PR has merged or closed, the pane stays and shows the final state. If you close it, it stays closed until a new PR opens; a notice says `/prs` brings it back.
+It refreshes 5 s after Claude runs `gh pr`, `gh stack` or `git push`, when the session checks out a new branch, and when you press `r` or run `/prs`. Between those, it polls on a timer:
+
+- **While a PR is open**, it polls after 60 s. Each poll that finds nothing changed doubles the wait, up to 3 min. A change, or any refresh not set off by the timer, sets it back to 60 s.
+- **With no open PR**, it polls every 3 min.
+- **Finished branches:** a timed poll skips a branch when every PR in its stack has merged or closed, and keeps showing their final state. A refresh not set off by the timer checks every branch.
+- **Rate limit:** each query reads GitHub's remaining GraphQL budget. When fewer than 500 points remain, the next timed poll waits until the budget resets, and at least 3 min. A rate-limit error also makes it wait at least 3 min.
+- **Closed pane:** if you close the pane, timed polling stops. The pane stays closed until a new PR opens; a notice says `/prs` brings it back.
+
+When every PR has merged or closed, the pane stays and shows the final state.
 
 It needs [`gh`](https://cli.github.com), signed in. Without it, or outside a GitHub repo, the mod shows nothing.
 

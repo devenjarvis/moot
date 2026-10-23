@@ -2,7 +2,20 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Pr, PrGroup, Snapshot, Tone, TrackedBranch } from '../types'
-import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
+import {
+  buildMemberQuery,
+  buildQuery,
+  childBranches,
+  groupPrs,
+  nextStep,
+  ownTone,
+  parentBranches,
+  parsePrs,
+  stackMembers,
+  withMembers,
+} from './github'
+import { ACTIVE_MS, IDLE_MS, lowerRate, nextDelay } from './polling'
+import type { RateLimit } from './polling'
 
 const PANE = 'pr-status'
 const TITLE = 'Pull requests'
@@ -12,8 +25,6 @@ const snapshot = atom({ plugin: 'pr-status', key: 'snapshot' } as const, null)
 const seen = atom({ plugin: 'pr-status', key: 'seen' } as const, [])
 const dismissed = atom({ plugin: 'pr-status', key: 'dismissed' } as const, false)
 
-const ACTIVE_MS = 60_000
-const IDLE_MS = 180_000
 const AFTER_COMMAND_MS = 5_000
 const STACK_ROUNDS = 5
 const TRIGGER = /\bgh\s+(pr|stack)\b|\bgit\s+push\b/
@@ -36,6 +47,9 @@ const stackFields = new Map<string, boolean>()
 let cadence: Timer | null = null
 let soon: Timer | null = null
 let inFlight: Promise<void> | null = null
+let isFullRun = false
+let wantFull = true
+let quiet = 0
 
 const firstLine = (text: string) => text.trim().split('\n')[0] ?? ''
 const keyOf = (pr: Pr) => `${pr.repo}#${pr.number}`
@@ -101,33 +115,56 @@ async function repoInfo($: EngineInterface, root: string): Promise<RepoInfo> {
   return info
 }
 
-async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]): Promise<Pr[]> {
-  const withStack = stackFields.get(root) ?? true
+async function graphql($: EngineInterface, root: string, info: RepoInfo, text: string, vars: [string, string | number][]) {
   const [owner = '', name = ''] = info.repo.split('/')
   const argv = [
     'gh',
     'api',
     'graphql',
     '-f',
-    `query=${buildQuery(heads, bases, withStack)}`,
+    `query=${text}`,
     '-f',
     `owner=${owner}`,
     '-f',
     `name=${name}`,
-    ...heads.flatMap((branch, i) => ['-f', `b${i}=${branch}`]),
-    ...bases.flatMap((branch, i) => ['-f', `c${i}=${branch}`]),
+    ...vars.flatMap(([key, value]) => [typeof value === 'number' ? '-F' : '-f', `${key}=${value}`]),
   ]
   const res = await run($, argv, root, 20_000)
   if (!res) throw new Error('gh is not installed')
+  return res
+}
+
+const failure = (res: { stderr: string; stdout: string }, rate: RateLimit | null = null) => {
+  const message = firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed'
+  const isLimited = /rate limit/i.test(res.stderr)
+  return Object.assign(new Error(message), { rate: isLimited ? { remaining: 0, resetAt: rate?.resetAt ?? '' } : rate })
+}
+
+const rateOf = (err: unknown): RateLimit | null => (err as { rate?: RateLimit | null })?.rate ?? null
+
+async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]) {
+  const withStack = stackFields.get(root) ?? true
+  const vars = [...heads.map((branch, i) => [`b${i}`, branch] as [string, string]), ...bases.map((branch, i) => [`c${i}`, branch] as [string, string])]
+  const res = await graphql($, root, info, buildQuery(heads, bases, withStack), vars)
   if (res.exitCode !== 0) {
     const message = `${res.stderr}\n${res.stdout}`
     if (withStack && /Field '(?:stack|stackEntry)'/.test(message)) {
       stackFields.set(root, false)
       return query($, root, info, heads, bases)
     }
-    throw new Error(firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed')
+    throw failure(res)
   }
-  return parsePrs(JSON.parse(res.stdout), info.repo, info.allowed)
+  let json = JSON.parse(res.stdout)
+  let rate: RateLimit | null = json?.data?.rateLimit ?? null
+  const numbers = withStack ? stackMembers(json) : []
+  if (numbers.length > 0) {
+    const more = await graphql($, root, info, buildMemberQuery(numbers), numbers.map((number, i) => [`p${i}`, number]))
+    if (more.exitCode !== 0) throw failure(more, rate)
+    const members = JSON.parse(more.stdout)
+    rate = lowerRate(rate, members?.data?.rateLimit ?? null)
+    json = withMembers(json, members)
+  }
+  return { prs: parsePrs(json, info.repo, info.allowed), rate }
 }
 
 async function fetchRoot($: EngineInterface, root: string, names: string[]) {
@@ -135,24 +172,32 @@ async function fetchRoot($: EngineInterface, root: string, names: string[]) {
   const askedHeads = new Set<string>()
   const askedBases = new Set<string>()
   const prs: Pr[] = []
+  let rate: RateLimit | null = null
   let heads = names.filter(name => name !== info.defaultBranch)
   let bases = heads
   for (let round = 0; round <= STACK_ROUNDS && heads.length + bases.length > 0; round++) {
     heads.forEach(name => askedHeads.add(name))
     bases.forEach(name => askedBases.add(name))
-    for (const pr of await query($, root, info, heads, bases)) {
+    let found: Awaited<ReturnType<typeof query>>
+    try {
+      found = await query($, root, info, heads, bases)
+    } catch (err) {
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { rate: lowerRate(rate, rateOf(err)) })
+    }
+    rate = lowerRate(rate, found.rate)
+    for (const pr of found.prs) {
       const isFound = round > 0 || !heads.includes(pr.head)
       if ((!isFound || pr.state === 'OPEN') && !prs.some(one => one.number === pr.number)) prs.push(pr)
     }
     heads = parentBranches(prs, info.defaultBranch).filter(name => !askedHeads.has(name))
     bases = childBranches(prs, askedBases)
   }
-  return { repo: info.repo, prs }
+  return { repo: info.repo, prs, rate }
 }
 
-function schedule($: EngineInterface, ms: number) {
+function schedule($: EngineInterface, ms: number | null) {
   cadence?.cancel()
-  cadence = $.clock.after(ms, () => void refresh($))
+  cadence = ms === null ? null : $.clock.after(ms, () => void refresh($, true))
 }
 
 function refreshSoon($: EngineInterface) {
@@ -160,7 +205,11 @@ function refreshSoon($: EngineInterface) {
   soon = $.clock.after(AFTER_COMMAND_MS, () => void refresh($))
 }
 
-function refresh($: EngineInterface): Promise<void> {
+function refresh($: EngineInterface, isTimed = false): Promise<void> {
+  if (!isTimed) quiet = 0
+  if (!isTimed && !(inFlight && isFullRun)) wantFull = true
+  // A timed run may have skipped finished branches, so a trigger that lands during one runs again after it.
+  if (inFlight && wantFull && !isFullRun) return inFlight.then(() => refresh($))
   inFlight ??= refreshNow($)
     .catch(() => undefined)
     .finally(() => {
@@ -170,26 +219,41 @@ function refresh($: EngineInterface): Promise<void> {
 }
 
 async function refreshNow($: EngineInterface) {
-  schedule($, IDLE_MS)
+  isFullRun = wantFull
+  wantFull = false
+  schedule($, (await read($, dismissed)) ? null : IDLE_MS)
   const tracked = await read($, branches)
   if (tracked.length === 0) return
-  const roots = new Map<string, string[]>()
-  for (const one of tracked) roots.set(one.root, [...(roots.get(one.root) ?? []), one.branch])
 
   const previous = await read($, snapshot)
-  const prs = new Map<string, Pr>()
+  const finished = (one: TrackedBranch) => {
+    const repo = previous?.repos[one.root]
+    const group = previous?.groups.find(group => group.prs.some(pr => pr.repo === repo && pr.head === one.branch))
+    return group?.prs.every(pr => pr.state !== 'OPEN') ? group.prs : null
+  }
+  const roots = new Map<string, string[]>()
   const kept: Pr[] = []
+  for (const one of tracked) {
+    const done = isFullRun ? null : finished(one)
+    if (done) kept.push(...done)
+    else roots.set(one.root, [...(roots.get(one.root) ?? []), one.branch])
+  }
+
+  const prs = new Map<string, Pr>()
   const repos: Record<string, string> = { ...previous?.repos }
   let error: string | null = null
+  let rate: RateLimit | null = null
   let fetched = 0
   for (const [root, names] of roots) {
     try {
       const found = await fetchRoot($, root, names)
       for (const pr of found.prs) prs.set(keyOf(pr), pr)
       repos[root] = found.repo
+      rate = lowerRate(rate, found.rate)
       fetched++
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
+      rate = lowerRate(rate, rateOf(err))
       const failedRepo = repoInfos.get(root)?.repo ?? repos[root]
       kept.push(...(previous?.groups.flatMap(group => group.prs).filter(pr => pr.repo === failedRepo) ?? []))
     }
@@ -218,7 +282,10 @@ async function refreshNow($: EngineInterface) {
       await $.ui.open({ id: PANE, title: TITLE, columns: 72 })
     }
   }
-  schedule($, open.length > 0 ? ACTIVE_MS : IDLE_MS)
+  const isSame = JSON.stringify(previous?.groups ?? null) === JSON.stringify(next.groups)
+  quiet = !isFullRun && isSame && open.length > 0 ? quiet + 1 : 0
+  const now = await $.clock.now()
+  schedule($, nextDelay({ isDismissed: await read($, dismissed), hasOpen: open.length > 0, quiet, rate, now }))
 }
 
 async function openInBrowser($: EngineInterface, pr: Pr) {
@@ -291,19 +358,17 @@ export const register: Register = on => {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     if (e.origin.kind === 'person') {
       await update($, dismissed, () => true)
+      schedule($, null)
       $.ui.toast('PR pane closed. Run /prs to bring it back.', { timeoutMs: 8_000 })
     }
     return next(e)
   })
 
   on('command.run', { command: 'prs' }, async $ => {
-    let snap = await read($, snapshot)
-    if (!snap?.groups.length) {
-      await refresh($)
-      snap = await read($, snapshot)
-    }
-    if (!snap?.groups.length) return { text: "No open PRs for this session's branches." }
     await update($, dismissed, () => false)
+    await refresh($)
+    const snap = await read($, snapshot)
+    if (!snap?.groups.length) return { text: "No open PRs for this session's branches." }
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
     return { text: 'Opened the pull request pane.' }
   })

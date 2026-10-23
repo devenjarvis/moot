@@ -1,7 +1,18 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Pr, PrGroup } from '../types'
-import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
+import {
+  buildMemberQuery,
+  buildQuery,
+  childBranches,
+  groupPrs,
+  nextStep,
+  ownTone,
+  parentBranches,
+  parsePrs,
+  stackMembers,
+  withMembers,
+} from './github'
 
 type Node = Record<string, unknown>
 
@@ -102,6 +113,48 @@ test('buildQuery passes branch names as variables and drops stack fields on requ
   expect(withStack).toContain('c0: pullRequests(baseRefName: $c0')
   expect(withStack).toContain('$c0: String!')
   expect(buildQuery(['feat-a'], [], false).includes('stack')).toBe(false)
+})
+
+test('buildQuery asks for stack entries by number only', async () => {
+  const query = buildQuery(['feat-a'], ['feat-a'], true)
+  expect(query).toContain('entries(first: 25) { nodes { position pullRequest { number } } }')
+  expect(query.includes('pullRequest { ...Core }')).toBe(false)
+  expect(query).toContain('rateLimit { remaining resetAt }')
+  expect(buildQuery(['feat-a'], [], false)).toContain('rateLimit { remaining resetAt }')
+})
+
+test('buildMemberQuery aliases one pullRequest per number', async () => {
+  const query = buildMemberQuery([101, 103])
+  expect(query).toContain('$p0: Int!')
+  expect(query).toContain('$p1: Int!')
+  expect(query).toContain('p0: pullRequest(number: $p0) { ...Core }')
+  expect(query).toContain('p1: pullRequest(number: $p1) { ...Core }')
+  expect(query).toContain('rateLimit { remaining resetAt }')
+  expect(query).toContain('fragment Core on PullRequest')
+})
+
+const light = (json: typeof RESPONSE) => {
+  const copy = JSON.parse(JSON.stringify(json))
+  for (const one of copy.data.repository.b0.nodes) {
+    for (const entry of one.stack?.entries.nodes ?? []) entry.pullRequest = { number: entry.pullRequest.number }
+  }
+  return copy
+}
+
+test('stackMembers lists entry numbers that are not top-level nodes', async () => {
+  expect(stackMembers(light(RESPONSE))).toEqual([101, 103])
+  expect(stackMembers({ data: { repository: { b0: { nodes: [core(7, 'a', 'main')] } } } })).toEqual([])
+})
+
+test('withMembers fills light stack entries so parsePrs reads them as before', async () => {
+  const members = { data: { repository: { p0: STACK_ENTRIES[0]!.pullRequest, p1: STACK_ENTRIES[2]!.pullRequest } } }
+  expect(parsePrs(withMembers(light(RESPONSE), members), 'o/r', ['o/r'])).toEqual(parsePrs(RESPONSE, 'o/r', ['o/r']))
+})
+
+test('withMembers drops a stack entry whose member did not come back', async () => {
+  const members = { data: { repository: { p0: STACK_ENTRIES[0]!.pullRequest, p1: null } } }
+  const prs = parsePrs(withMembers(light(RESPONSE), members), 'o/r', ['o/r'])
+  expect(prs.map(one => one.number).sort()).toEqual([101, 102])
 })
 
 test('parsePrs reads a native stack, drops fork PRs and counts checks', async () => {
