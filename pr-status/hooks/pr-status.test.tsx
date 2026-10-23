@@ -458,3 +458,21 @@ test('a timed refresh keeps querying a merged branch with an open PR above it in
   await clock.advance(60_000)
   expect(graphqlCalls(world).slice(calls).some(argv => argv.includes('b0=feat-1'))).toBe(true)
 })
+
+test('a low rate-limit budget waits for the reset', async ($, on) => {
+  const low = JSON.stringify({
+    data: { repository: { b0: { nodes: [node(7, 'feat-a', 'main')] } }, rateLimit: { remaining: 100, resetAt: '1970-01-01T00:30:00Z' } },
+  })
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: low })
+  await start($, clock)
+  expect(world.opens).toEqual(['pr-status'])
+  const calls = graphqlCalls(world).length
+  await clock.advance(29 * 60_000)
+  expect(graphqlCalls(world).length).toBe(calls)
+  await clock.advance(60_000)
+  expect(graphqlCalls(world).length).toBe(calls + 1)
+
+  await $.tool.call({ tool: 'Bash', command: 'gh pr view' } as never)
+  await clock.advance(5_000)
+  expect(graphqlCalls(world).length).toBe(calls + 2)
+})
