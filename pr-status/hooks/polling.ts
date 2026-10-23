@@ -16,4 +16,6 @@ export function nextDelay({ isDismissed, hasOpen, quiet, rate, now }: DelayInput
   return Math.min(ACTIVE_MS * 2 ** quiet, IDLE_MS)
 }
 
-export const lowerRate = (a: RateLimit | null, b: RateLimit | null) => (!a || (b && b.remaining < a.remaining) ? b : a)
+export function lowerRate(a: RateLimit | null, b: RateLimit | null): RateLimit | null {
+  return !a || (b && b.remaining < a.remaining) ? b : a
+}

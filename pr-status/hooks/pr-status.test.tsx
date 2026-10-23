@@ -506,3 +506,21 @@ test('a low budget read before a failed member query still waits for the reset',
   await clock.advance(28 * 60_000)
   expect(graphqlCalls(world).length).toBe(calls)
 })
+
+test('a rate-limited member query keeps the reset time the head query read', async ($, on) => {
+  const low = JSON.stringify({
+    data: {
+      repository: { b0: { nodes: [node(102, 'feat-2', 'feat-1', { stack: lightStack(STACK), stackEntry: { position: 2 } })] } },
+      rateLimit: { remaining: 3, resetAt: '1970-01-01T00:30:00Z' },
+    },
+  })
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-2', 'main')]) })
+  world.branch = 'feat-2'
+  await start($, clock)
+  world.graphql = { exitCode: 0, stdout: low }
+  world.memberError = 'GraphQL: API rate limit exceeded for user ID 1.'
+  await clock.advance(60_000)
+  const calls = graphqlCalls(world).length
+  await clock.advance(28 * 60_000)
+  expect(graphqlCalls(world).length).toBe(calls)
+})

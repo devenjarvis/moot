@@ -136,8 +136,8 @@ async function graphql($: EngineInterface, root: string, info: RepoInfo, text: s
 
 const failure = (res: { stderr: string; stdout: string }, rate: RateLimit | null = null) => {
   const message = firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed'
-  const isLimited = /rate limit/i.test(`${res.stderr}\n${res.stdout}`)
-  return Object.assign(new Error(message), { rate: isLimited ? lowerRate(rate, { remaining: 0, resetAt: '' }) : rate })
+  const isLimited = /rate limit/i.test(res.stderr)
+  return Object.assign(new Error(message), { rate: isLimited ? { remaining: 0, resetAt: rate?.resetAt ?? '' } : rate })
 }
 
 const rateOf = (err: unknown): RateLimit | null => (err as { rate?: RateLimit | null })?.rate ?? null
