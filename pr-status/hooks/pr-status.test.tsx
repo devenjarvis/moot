@@ -377,3 +377,45 @@ test('a failed member query keeps the last data and shows the error', async ($, 
   for (const key of ['open-103', 'open-102', 'open-101']) expect(await ui.find({ key })).toBeDefined()
   await ui.unmount()
 })
+
+test('/prs refreshes and resets the back-off', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  await clock.advance(60_000)
+  const calls = graphqlCalls(world).length
+  await $.command.run({ command: 'prs', args: '' } as never)
+  expect(graphqlCalls(world).length).toBe(calls + 1)
+  expect(world.panes).toEqual(['pr-status'])
+  await clock.advance(60_000)
+  expect(graphqlCalls(world).length).toBe(calls + 2)
+})
+
+test('an unchanged open PR backs off to 180 s', async ($, on) => {
+  const { world, clock } = setup($, on, { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main')]) })
+  await start($, clock)
+  const at = (n: number) => graphqlCalls(world).length === n
+  await clock.advance(60_000)
+  expect(at(2)).toBe(true)
+  await clock.advance(119_000)
+  expect(at(2)).toBe(true)
+  await clock.advance(1_000)
+  expect(at(3)).toBe(true)
+  await clock.advance(179_000)
+  expect(at(3)).toBe(true)
+  await clock.advance(1_000)
+  expect(at(4)).toBe(true)
+  await clock.advance(180_000)
+  expect(at(5)).toBe(true)
+
+  world.graphql = { exitCode: 0, stdout: reply([node(7, 'feat-a', 'main', { reviewDecision: 'CHANGES_REQUESTED' })]) }
+  await clock.advance(180_000)
+  expect(at(6)).toBe(true)
+  await clock.advance(60_000)
+  expect(at(7)).toBe(true)
+
+  await $.tool.call({ tool: 'Bash', command: 'git push' } as never)
+  await clock.advance(5_000)
+  expect(at(8)).toBe(true)
+  await clock.advance(60_000)
+  expect(at(9)).toBe(true)
+})
