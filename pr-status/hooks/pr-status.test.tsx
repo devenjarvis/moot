@@ -54,13 +54,15 @@ type World = {
   branch: string
   graphql: { exitCode: number; stdout: string; stderr?: string }
   then?: World['graphql']
+  members: Node[]
+  memberError?: string
   calls: string[][]
   opens: string[]
   panes: string[]
 }
 
 function setup($: Engine, on: On, graphql: World['graphql'] = { exitCode: 0, stdout: reply([]) }) {
-  const world: World = { root: '/repo', branch: 'feat-a', graphql, calls: [], opens: [], panes: [] }
+  const world: World = { root: '/repo', branch: 'feat-a', graphql, members: [], calls: [], opens: [], panes: [] }
   const clock = mock.clock(on)
   const out = (stdout: string, exitCode = 0, stderr = '') => ({
     value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
@@ -73,6 +75,12 @@ function setup($: Engine, on: On, graphql: World['graphql'] = { exitCode: 0, std
     if (line.startsWith('git symbolic-ref')) return out('origin/main\n')
     if (line.startsWith('git remote get-url')) return out('git@github.com:o/r.git\n')
     if (line.startsWith('gh repo view')) return out('{"nameWithOwner":"o/r","defaultBranchRef":{"name":"main"}}')
+    if (line.startsWith('gh api graphql') && line.includes('pullRequest(number:')) {
+      if (world.memberError) return out('', 1, world.memberError)
+      const wanted = argv.filter(arg => /^p\d+=/.test(arg)).map(arg => arg.split('='))
+      const repository = Object.fromEntries(wanted.map(([key, n]) => [key, world.members.find(one => one.number === Number(n)) ?? null]))
+      return out(JSON.stringify({ data: { repository } }))
+    }
     if (line.startsWith('gh api graphql')) {
       const answer = world.graphql
       if (world.then) [world.graphql, world.then] = [world.then, undefined]
@@ -103,6 +111,12 @@ async function start($: Engine, clock: ReturnType<typeof mock.clock>) {
 }
 
 const graphqlCalls = (world: World) => world.calls.filter(argv => argv[0] === 'gh' && argv[1] === 'api')
+const memberCalls = (world: World) => graphqlCalls(world).filter(argv => argv.join(' ').includes('pullRequest(number:'))
+
+const lightStack = (stack: typeof STACK) => ({
+  ...stack,
+  entries: { nodes: stack.entries.nodes.map(entry => ({ position: entry.position, pullRequest: { number: entry.pullRequest.number } })) },
+})
 
 test('tracks the session branches, skipping the default branch and detached HEAD', async ($, on) => {
   const { world, clock } = setup($, on)
@@ -172,7 +186,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
   test(`draws a native stack top first on ${surface}`, async ($, on) => {
     const { world, clock } = setup($, on)
     world.branch = 'feat-2'
-    world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack: STACK, stackEntry: { position: 2 } })]) }
+    world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack: lightStack(STACK), stackEntry: { position: 2 } })]) }
+    world.members = STACK.entries.nodes.map(entry => entry.pullRequest)
     await start($, clock)
     expect(world.opens).toEqual(['pr-status'])
 
@@ -185,7 +200,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const before = graphqlCalls(world).length
     await ui.press({ key: 'refresh' })
-    expect(graphqlCalls(world).length).toBe(before + 1)
+    expect(graphqlCalls(world).length).toBe(before + 2)
+    expect(memberCalls(world).length).toBe(2)
 
     await ui.press({ key: 'open-102' })
     expect(world.calls.some(argv => argv.join(' ') === 'gh pr view 102 --web -R o/r')).toBe(true)
@@ -301,7 +317,8 @@ test('a problem below is drawn as inherited, apart from the PR own state', async
   }
   const { world, clock } = setup($, on)
   world.branch = 'feat-2'
-  world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack, stackEntry: { position: 2 } })]) }
+  world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack: lightStack(stack), stackEntry: { position: 2 } })]) }
+  world.members = stack.entries.nodes.map(entry => entry.pullRequest)
   await start($, clock)
   const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
   expect(await ui.find({ type: 'Text', text: '↓ #101 checks failing' })).toBeDefined()
@@ -326,5 +343,37 @@ test('an inferred stack also finds PRs stacked above the tracked branch', async 
   const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
   expect(await ui.find({ type: 'Text', text: 'Stack · 3 PRs → main' })).toBeDefined()
   expect(await ui.find({ key: 'open-9' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('fetches native stack members in one query and draws their checks', async ($, on) => {
+  const failing = { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: 'StatusContext', state: 'FAILURE' }] } } } }] }
+  const { world, clock } = setup($, on)
+  world.branch = 'feat-2'
+  world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack: lightStack(STACK), stackEntry: { position: 2 } })]) }
+  world.members = [node(101, 'feat-1', 'main', { commits: failing }), node(103, 'feat-3', 'feat-2')]
+  await start($, clock)
+  expect(memberCalls(world).length).toBe(1)
+  expect(memberCalls(world)[0]!.filter(arg => /^p\d+=/.test(arg))).toEqual(['p0=101', 'p1=103'])
+
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: /Stack #4 · 3 PRs → main/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '✗ 1' })).toBeDefined()
+  for (const key of ['open-103', 'open-102', 'open-101']) expect(await ui.find({ key })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a failed member query keeps the last data and shows the error', async ($, on) => {
+  const { world, clock } = setup($, on)
+  world.branch = 'feat-2'
+  world.graphql = { exitCode: 0, stdout: reply([node(102, 'feat-2', 'feat-1', { stack: lightStack(STACK), stackEntry: { position: 2 } })]) }
+  world.members = STACK.entries.nodes.map(entry => entry.pullRequest)
+  await start($, clock)
+  world.memberError = 'HTTP 502: Bad Gateway'
+  await clock.advance(60_000)
+
+  const ui = await $.ui.mount({ plugin: 'pr-status', surface: 'terminal', component: 'Pane', requestId: 'pr-status', props: PANE_PROPS })
+  expect(await ui.find({ type: 'Text', text: '⚠ HTTP 502: Bad Gateway' })).toBeDefined()
+  for (const key of ['open-103', 'open-102', 'open-101']) expect(await ui.find({ key })).toBeDefined()
   await ui.unmount()
 })

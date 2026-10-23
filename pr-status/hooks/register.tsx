@@ -2,7 +2,18 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Pr, PrGroup, Snapshot, Tone, TrackedBranch } from '../types'
-import { buildQuery, childBranches, groupPrs, nextStep, ownTone, parentBranches, parsePrs } from './github'
+import {
+  buildMemberQuery,
+  buildQuery,
+  childBranches,
+  groupPrs,
+  nextStep,
+  ownTone,
+  parentBranches,
+  parsePrs,
+  stackMembers,
+  withMembers,
+} from './github'
 
 const PANE = 'pr-status'
 const TITLE = 'Pull requests'
@@ -101,33 +112,55 @@ async function repoInfo($: EngineInterface, root: string): Promise<RepoInfo> {
   return info
 }
 
-async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]): Promise<Pr[]> {
-  const withStack = stackFields.get(root) ?? true
+type RateLimit = { remaining: number; resetAt: string }
+
+const lower = (a: RateLimit | null, b: RateLimit | null) => (!a || (b && b.remaining < a.remaining) ? b : a)
+
+async function graphql($: EngineInterface, root: string, info: RepoInfo, text: string, vars: [string, string | number][]) {
   const [owner = '', name = ''] = info.repo.split('/')
   const argv = [
     'gh',
     'api',
     'graphql',
     '-f',
-    `query=${buildQuery(heads, bases, withStack)}`,
+    `query=${text}`,
     '-f',
     `owner=${owner}`,
     '-f',
     `name=${name}`,
-    ...heads.flatMap((branch, i) => ['-f', `b${i}=${branch}`]),
-    ...bases.flatMap((branch, i) => ['-f', `c${i}=${branch}`]),
+    ...vars.flatMap(([key, value]) => [typeof value === 'number' ? '-F' : '-f', `${key}=${value}`]),
   ]
   const res = await run($, argv, root, 20_000)
   if (!res) throw new Error('gh is not installed')
+  return res
+}
+
+const failure = (res: { stderr: string; stdout: string }) =>
+  new Error(firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed')
+
+async function query($: EngineInterface, root: string, info: RepoInfo, heads: string[], bases: string[]) {
+  const withStack = stackFields.get(root) ?? true
+  const vars = [...heads.map((branch, i) => [`b${i}`, branch] as [string, string]), ...bases.map((branch, i) => [`c${i}`, branch] as [string, string])]
+  const res = await graphql($, root, info, buildQuery(heads, bases, withStack), vars)
   if (res.exitCode !== 0) {
     const message = `${res.stderr}\n${res.stdout}`
     if (withStack && /Field '(?:stack|stackEntry)'/.test(message)) {
       stackFields.set(root, false)
       return query($, root, info, heads, bases)
     }
-    throw new Error(firstLine(res.stderr) || firstLine(res.stdout) || 'gh api graphql failed')
+    throw failure(res)
   }
-  return parsePrs(JSON.parse(res.stdout), info.repo, info.allowed)
+  let json = JSON.parse(res.stdout)
+  let rate: RateLimit | null = json?.data?.rateLimit ?? null
+  const numbers = withStack ? stackMembers(json) : []
+  if (numbers.length > 0) {
+    const more = await graphql($, root, info, buildMemberQuery(numbers), numbers.map((number, i) => [`p${i}`, number]))
+    if (more.exitCode !== 0) throw failure(more)
+    const members = JSON.parse(more.stdout)
+    rate = lower(rate, members?.data?.rateLimit ?? null)
+    json = withMembers(json, members)
+  }
+  return { prs: parsePrs(json, info.repo, info.allowed), rate }
 }
 
 async function fetchRoot($: EngineInterface, root: string, names: string[]) {
@@ -135,19 +168,22 @@ async function fetchRoot($: EngineInterface, root: string, names: string[]) {
   const askedHeads = new Set<string>()
   const askedBases = new Set<string>()
   const prs: Pr[] = []
+  let rate: RateLimit | null = null
   let heads = names.filter(name => name !== info.defaultBranch)
   let bases = heads
   for (let round = 0; round <= STACK_ROUNDS && heads.length + bases.length > 0; round++) {
     heads.forEach(name => askedHeads.add(name))
     bases.forEach(name => askedBases.add(name))
-    for (const pr of await query($, root, info, heads, bases)) {
+    const found = await query($, root, info, heads, bases)
+    rate = lower(rate, found.rate)
+    for (const pr of found.prs) {
       const isFound = round > 0 || !heads.includes(pr.head)
       if ((!isFound || pr.state === 'OPEN') && !prs.some(one => one.number === pr.number)) prs.push(pr)
     }
     heads = parentBranches(prs, info.defaultBranch).filter(name => !askedHeads.has(name))
     bases = childBranches(prs, askedBases)
   }
-  return { repo: info.repo, prs }
+  return { repo: info.repo, prs, rate }
 }
 
 function schedule($: EngineInterface, ms: number) {

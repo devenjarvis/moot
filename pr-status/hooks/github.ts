@@ -14,7 +14,7 @@ const CORE = `fragment Core on PullRequest {
 
 const TOP_WITH_STACK = `fragment Top on PullRequest {
   ...Core
-  stack { number size baseRefName entries(first: 25) { nodes { position pullRequest { ...Core } } } }
+  stack { number size baseRefName entries(first: 25) { nodes { position pullRequest { number } } } }
   stackEntry { position }
 }`
 
@@ -33,12 +33,50 @@ export function buildQuery(heads: string[], bases: string[], withStack: boolean)
   repository(owner: $owner, name: $name) {
 ${fields}
   }
+  rateLimit { remaining resetAt }
 }
 ${withStack ? TOP_WITH_STACK : TOP_PLAIN}
 ${CORE}`
 }
 
 type Raw = Record<string, any>
+
+export function buildMemberQuery(numbers: number[]): string {
+  const vars = numbers.map((_, i) => `$p${i}: Int!`).join(', ')
+  const fields = numbers.map((_, i) => `    p${i}: pullRequest(number: $p${i}) { ...Core }`).join('\n')
+  return `query($owner: String!, $name: String!, ${vars}) {
+  repository(owner: $owner, name: $name) {
+${fields}
+  }
+  rateLimit { remaining resetAt }
+}
+${CORE}`
+}
+
+function topNodes(json: unknown): Raw[] {
+  const repository: Raw = (json as Raw)?.data?.repository ?? {}
+  return Object.values(repository).flatMap((connection: Raw) => connection?.nodes ?? [])
+}
+
+const entriesOf = (node: Raw): Raw[] => node.stack?.entries?.nodes ?? []
+
+export function stackMembers(json: unknown): number[] {
+  const nodes = topNodes(json)
+  const top = new Set(nodes.map(node => node.number))
+  const wanted = nodes.flatMap(entriesOf).map(entry => entry?.pullRequest?.number as number | undefined)
+  return [...new Set(wanted.filter((number): number is number => number !== undefined && !top.has(number)))]
+}
+
+export function withMembers(json: unknown, members: unknown): unknown {
+  const copy = structuredClone(json) as Raw
+  const full = new Map<number, Raw>()
+  for (const node of Object.values((members as Raw)?.data?.repository ?? {}) as Raw[]) if (node) full.set(node.number, node)
+  for (const node of topNodes(copy)) full.set(node.number, { ...node, stack: null })
+  for (const node of topNodes(copy)) {
+    for (const entry of entriesOf(node)) if (entry?.pullRequest) entry.pullRequest = full.get(entry.pullRequest.number) ?? null
+  }
+  return copy
+}
 
 const PASSING = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED'])
 
