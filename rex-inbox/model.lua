@@ -9,7 +9,7 @@ local SYMBOL = { blocked = "▲", error = "✗", done = "✓", working = "◷", 
 local COLOR = { blocked = "1;31", error = "31", done = "32", working = "33", idle = "2" }
 
 local APP = "claude-code"
-local MAX_SESSION, MAX_FOLDER = 20, 24
+local MAX_KEYS = 9
 
 local function days_from_civil(y, m, d)
   if m <= 2 then y = y - 1 end
@@ -174,53 +174,116 @@ local function cut(s, width)
   end
   return table.concat(out) .. "…"
 end
+M.cut = cut
 
-local function pad(s, width)
-  s = cut(s, width)
-  return s .. string.rep(" ", width - M.width(s))
+-- Wraps the symbol that starts at byte `at` in its state's color, if cutting
+-- the line left it whole.
+local function paint(line, at, symbol, state)
+  if line:sub(at, at + #symbol - 1) ~= symbol then return line end
+  return line:sub(1, at - 1) .. "\27[" .. COLOR[state] .. "m" .. symbol .. "\27[0m"
+    .. line:sub(at + #symbol)
 end
 
-local function column_width(rows, key, max)
-  local w = 0
-  for _, r in ipairs(rows) do w = math.max(w, M.width(r[key])) end
-  return math.min(w, max)
+function M.group(rows)
+  local by_key, groups = {}, {}
+  for _, r in ipairs(rows) do
+    local key = r.session_id or r.session
+    local g = by_key[key]
+    if not g then
+      g = { session = r.session, rows = {} }
+      by_key[key] = g
+      groups[#groups + 1] = g
+    end
+    g.rows[#g.rows + 1] = r
+  end
+  for _, g in ipairs(groups) do
+    M.sort(g.rows)
+    g.top = g.rows[1]
+    g.folder = g.top.folder
+    for _, r in ipairs(g.rows) do
+      if r.folder ~= g.folder then
+        g.folder = nil
+        break
+      end
+    end
+  end
+  table.sort(groups, function(a, b)
+    local first = urgent_first(a.top.record, b.top.record)
+    if first ~= nil then return first end
+    return (a.session or "") < (b.session or "")
+  end)
+  return groups
 end
 
+local function agent_lines(r, key, folder_known, width, now)
+  local rec = r.record
+  local symbol = SYMBOL[rec.state]
+  local prefix = "  " .. key .. " " .. symbol .. " "
+  local indent = M.width(prefix)
+
+  local msg = clean(rec.msg)
+  if rec.state == "blocked" and rec.kind then
+    msg = ("[" .. clean(rec.kind) .. "] " .. msg):gsub("%s+$", "")
+  end
+  local title = r.title
+  if not folder_known and r.folder ~= "" then
+    title = title ~= "" and (r.folder .. " · " .. title) or r.folder
+  end
+  if title == "" then title, msg = msg, "" end
+
+  local age = M.age(rec.updated_at, now)
+  local room = width - indent - M.width(age) - 1
+  local line
+  if room >= 1 then
+    local t = cut(title, room)
+    line = prefix .. t .. string.rep(" ", room - M.width(t) + 1) .. age
+  else
+    line = cut(prefix .. title, width)
+  end
+  local out = { { text = line:gsub("%s+$", ""), symbol = symbol, at = #prefix - #symbol, state = rec.state } }
+  if msg ~= "" then out[2] = { text = cut(string.rep(" ", indent) .. msg, width) } end
+  return out
+end
+
+-- Returns the lines to draw and, for keys 1 to MAX_KEYS, the row each key
+-- stands for.
 function M.render(rows, width, now, color)
-  local sorted = {}
+  local cleaned = {}
   for i, r in ipairs(rows) do
-    sorted[i] = {
+    cleaned[i] = {
+      source = r,
       record = r.record,
-      block_id = r.block_id,
+      session_id = r.session_id,
       session = clean(r.session),
       folder = clean(r.folder),
       title = clean(r.title),
-      age = M.age(r.record.updated_at, now),
     }
   end
-  M.sort(sorted)
 
-  local lines = { cut(M.counts(sorted), width) }
-  local aw = column_width(sorted, "age", 4)
-  local sw = column_width(sorted, "session", MAX_SESSION)
-  local fw = column_width(sorted, "folder", MAX_FOLDER)
-  for _, r in ipairs(sorted) do
-    local rec = r.record
-    local text = {}
-    if r.title ~= "" then text[#text + 1] = r.title end
-    local msg = clean(rec.msg)
-    if rec.state == "blocked" and rec.kind then msg = "[" .. clean(rec.kind) .. "] " .. msg end
-    if msg ~= "" then text[#text + 1] = msg end
-    local symbol = SYMBOL[rec.state]
-    local line = cut(table.concat({
-      symbol, pad(r.age, aw), pad(r.session, sw), pad(r.folder, fw), table.concat(text, "  "),
-    }, "  "):gsub("%s+$", ""), width)
-    if color and line:sub(1, #symbol) == symbol then
-      line = "\27[" .. COLOR[rec.state] .. "m" .. symbol .. "\27[0m" .. line:sub(#symbol + 1)
-    end
-    lines[#lines + 1] = line
+  local lines, keys = { cut(M.counts(cleaned), width) }, {}
+  local function add(text, at, symbol, state)
+    if color and symbol then text = paint(text, at, symbol, state) end
+    lines[#lines + 1] = text
   end
-  return lines
+
+  for i, g in ipairs(M.group(cleaned)) do
+    if i > 1 then add("") end
+    local state = g.top.record.state
+    local head = SYMBOL[state] .. " " .. g.session
+    if g.folder and g.folder ~= "" then head = head .. " · " .. g.folder end
+    add(cut(head, width), 1, SYMBOL[state], state)
+    for _, r in ipairs(g.rows) do
+      local key = " "
+      if #keys < MAX_KEYS then
+        keys[#keys + 1] = r.source
+        key = tostring(#keys)
+      end
+      for _, l in ipairs(agent_lines(r, key, g.folder ~= nil, width, now)) do
+        add(l.text, l.at, l.symbol, l.state)
+      end
+    end
+  end
+  return lines, keys
 end
 
 return M

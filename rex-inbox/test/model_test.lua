@@ -110,18 +110,59 @@ local function blocked_row(kind)
     record = rec("blocked", "2026-10-23T09:57:00Z", { kind = kind, msg = "approve Bash: rm x" }),
   }
 end
-local lines = M.render({ blocked_row("permission") }, 200, NOW)
-eq(#lines, 2, "header plus one row")
-eq(lines[1], "1 blocked", "header line")
-local line = lines[2]
-for _, part in ipairs({ "api-work", "moot-rex-inbox", "fix login", "permission", "approve Bash: rm x", "3m" }) do
-  assert(line:find(part, 1, true), "row is missing " .. part .. ": " .. line)
-end
-assert(not M.render({ blocked_row(nil) }, 200, NOW)[2]:find("permission", 1, true), "no kind when the record has none")
-local done_row = { session = "s", folder = "f", title = "t", record = rec("done", "2026-10-23T09:57:00Z", { kind = "permission" }) }
-assert(not M.render({ done_row }, 200, NOW)[2]:find("permission", 1, true), "kind only for blocked")
+-- render: a session header, then two lines per agent (items 3, 5)
+local lines, keys = M.render({ blocked_row("permission") }, 40, NOW)
+eq(lines[1], "1 blocked", "counts line")
+eq(lines[2], "▲ api-work · moot-rex-inbox", "session header with its folder")
+eq(lines[3], "  1 ▲ fix login                       3m", "agent line with key, title, and age")
+eq(lines[4], "      [permission] approve Bash: rm x", "message line with kind")
+eq(#lines, 4, "no other lines")
+eq(keys[1].title, "fix login", "key 1 maps to the row's title")
+assert(not table.concat(M.render({ blocked_row(nil) }, 80, NOW), "\n"):find("[", 1, true), "no kind when the record has none")
+local done_row = { session = "s", folder = "f", title = "t", record = rec("done", "2026-10-23T09:57:00Z", { kind = "permission", msg = "m" }) }
+assert(not table.concat(M.render({ done_row }, 80, NOW), "\n"):find("permission", 1, true), "kind only for blocked")
+local quiet = { session = "s", folder = "f", title = "t", record = rec("idle", "2026-10-23T09:57:00Z") }
+eq(#M.render({ quiet }, 80, NOW), 3, "no message line without a message")
+local untitled = { session = "s", folder = "f", title = "", record = rec("working", "2026-10-23T09:57:00Z", { msg = "Running tests" }) }
+local ul = M.render({ untitled }, 30, NOW)
+eq(ul[3], "  1 ◷ Running tests         3m", "message moves up when there is no title")
+eq(#ul, 3, "untitled agent takes one line")
 
--- render: each state has a distinct symbol at the start of the row
+-- render: groups by session, most urgent group first, rows by urgency inside
+local function srow(session, folder, title, state, at)
+  return { session = session, session_id = "id-" .. session, folder = folder, title = title, record = rec(state, at) }
+end
+local grouped, gkeys = M.render({
+  srow("docs", "moot", "readme", "done", "2026-10-23T09:50:00Z"),
+  srow("api", "app", "refactor", "working", "2026-10-23T09:59:00Z"),
+  srow("api", "app", "login", "blocked", "2026-10-23T09:57:00Z"),
+  srow("ops", "infra", "deploy", "idle", "2026-10-23T09:00:00Z"),
+}, 30, NOW)
+local heads, order = {}, {}
+for _, l in ipairs(grouped) do
+  if l:match("^%S") and not l:match("^%d") then heads[#heads + 1] = l end
+end
+eq(table.concat(heads, "|"), "▲ api · app|✓ docs · moot|○ ops · infra", "groups by most urgent agent")
+for i = 1, 4 do order[i] = gkeys[i].title end
+eq(table.concat(order, ","), "login,refactor,readme,deploy", "keys follow the drawn order")
+eq(grouped[#grouped - 2], "", "blank line between groups")
+
+-- render: a session with agents in several folders names the folder per agent
+local mixed = M.render({
+  srow("api", "app", "login", "blocked", "2026-10-23T09:57:00Z"),
+  srow("api", "app-wt", "tests", "working", "2026-10-23T09:59:00Z"),
+}, 40, NOW)
+eq(mixed[2], "▲ api", "mixed folders leave the header bare")
+assert(mixed[3]:find("app · login", 1, true), "folder before title: " .. mixed[3])
+assert(mixed[4]:find("app-wt · tests", 1, true), "folder before title: " .. mixed[4])
+
+-- render: only nine agents get keys
+local many = {}
+for i = 1, 11 do many[i] = srow("s", "f", "t" .. i, "working", string.format("2026-10-23T09:%02d:00Z", i)) end
+local _, mkeys = M.render(many, 40, NOW)
+eq(mkeys[9] ~= nil and mkeys[10] == nil, true, "keys 1 to 9 only")
+
+-- render: each state has a distinct symbol
 local seen = {}
 for _, state in ipairs(M.STATES) do
   local sym = M.render({ row("s", state, "2026-10-23T09:00:00Z") }, 80, NOW)[2]:match("^(%S+)")
@@ -131,27 +172,36 @@ end
 
 -- render: lines cut to width (item 11), counted in characters, not bytes
 local long = {
-  session = "session-é", folder = "folder", title = "a title",
+  session = "session-é" .. string.rep("x", 60), folder = "folder", title = string.rep("t", 80),
   record = rec("working", "2026-10-23T09:59:00Z", { msg = string.rep("ü", 300) }),
 }
-for _, width in ipairs({ 80, 40, 10 }) do
+for _, width in ipairs({ 80, 40, 10, 3 }) do
   for _, l in ipairs(M.render({ long, blocked_row("question") }, width, NOW)) do
     assert(M.width(l) <= width, string.format("line longer than %d: %q", width, l))
   end
 end
+eq(M.cut("abcdef", 4), "abc…", "cut adds an ellipsis")
+eq(M.cut("abc", 4), "abc", "cut keeps short text")
 eq(M.width("ab"), 2, "ascii width")
 eq(M.width("üé"), 2, "utf-8 width")
 eq(M.width("日本"), 4, "wide characters take two columns")
-assert(M.width(M.render({ long }, 40, NOW)[2]) == 40, "a long row fills the width")
+local ll = M.render({ long }, 40, NOW)
+eq(M.width(ll[3]), 40, "a long title line fills the width")
+assert(ll[3]:find("1m$"), "age survives a long title: " .. ll[3])
+eq(M.width(ll[4]), 40, "a long message line fills the width")
 
 -- render: control characters never reach the terminal
-local evil = { session = "s", folder = "f", title = "x\27[2Jy", record = rec("idle", "2026-10-23T09:00:00Z", { msg = "a\nb" }) }
-local evil_line = M.render({ evil }, 200, NOW)[2]
-assert(not evil_line:find("[%c]"), "control characters stripped: " .. evil_line)
+local evil = { session = "s\27]0;x\7", folder = "f", title = "x\27[2Jy", record = rec("idle", "2026-10-23T09:00:00Z", { msg = "a\nb" }) }
+for _, l in ipairs(M.render({ evil }, 200, NOW)) do
+  assert(not l:find("[%c]"), "control characters stripped: " .. l)
+end
 
--- render: color wraps only the symbol and keeps the visible width
-local colored = M.render({ long }, 40, NOW, true)[2]
-assert(colored:find("\27%["), "color adds escapes")
-eq(M.width(colored:gsub("\27%[[%d;]*m", "")), 40, "colored row keeps width")
+-- render: color wraps only symbols and keeps the visible width
+local colored = M.render({ long }, 40, NOW, true)
+assert(colored[2]:find("\27%["), "header symbol colored")
+assert(colored[3]:find("\27%["), "row symbol colored")
+for i = 2, 4 do
+  eq(M.width((colored[i]:gsub("\27%[[%d;]*m", ""))), M.width(ll[i]), "colored line " .. i .. " keeps width")
+end
 
 print("ok")
