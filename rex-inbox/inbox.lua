@@ -5,22 +5,32 @@ local ALL = rex.args.all == true
 local REDRAW_DELAY, TICK, SNAPSHOT_TICK, KEY_POLL = 0.1, 1, 30, 0.1
 local NOTICE_SECONDS = 8
 
--- Reads key presses and mouse clicks from the pane's tty into a file that
--- the script polls.
--- A rex do script cannot read its own input without blocking its handlers.
--- Each read waits at most 0.1 s, so the reader sees the script exit within
--- that time, then puts the tty back and removes the file. The first sleep
--- lets a reader left by an earlier run in this pane restore the tty before
--- this one saves it.
+-- Reads key presses, mouse clicks, and size reports from the pane's tty into
+-- a file that the script polls. A rex do script cannot read its own input
+-- without blocking its handlers.
+--
+-- dd runs in the background, because once the script exits the shell puts the
+-- tty back in line mode and dd would wait for a whole line. The foreground
+-- loop checks every 0.1 s that the script is alive. When it is gone, the loop
+-- turns off the modes in SCREEN_ON, removes the file, and stops its process
+-- group, dd included. The shell restores the tty settings itself. Ctrl-C
+-- reaches this helper with the script, so it ignores it to live long enough
+-- to clean up.
 local KEY_READER = [[
+trap '' INT
 sleep 0.2
-saved=$(stty -g <"$1") || exit 1
-stty -icanon -echo min 0 time 1 <"$1"
-while kill -0 "$3" 2>/dev/null; do dd bs=16 count=1 <"$1" >>"$2" 2>/dev/null; done
-stty "$saved" <"$1"
-printf '\033[?1000l\033[?1006l' >"$1"
+stty -icanon -echo min 0 time 1 <"$1" || exit 1
+while :; do dd bs=16 count=1 <"$1" >>"$2" 2>/dev/null; done &
+while kill -0 "$3" 2>/dev/null; do sleep 0.1; done
+printf '\033[?2048l\033[?1006l\033[?1000l\033[?25h\033[?1049l' >"$1"
 rm -f "$2"
+kill 0
 ]]
+
+-- Alternate screen, hidden cursor, mouse clicks in SGR form, and in-band
+-- size reports, so a resize redraws at once instead of showing reflowed text.
+local SCREEN_ON = "\27[?1049h\27[?25l\27[?1000h\27[?1006h\27[?2048h"
+local SYNC_START, SYNC_END = "\27[?2026h", "\27[?2026l"
 
 local labels = {}
 local blocks = {}
@@ -28,6 +38,8 @@ local keys = {}
 local clickable = {}
 local notice
 local pending
+local reported
+local drawn
 
 local function block_call(session_id, block_id, method)
   return rex.block.call(TERMINAL, method, { session_id = session_id, block_id = block_id })
@@ -103,9 +115,13 @@ end
 
 local function draw()
   pending = nil
-  local size = rex.block_id and block_call(rex.session_id, rex.block_id, "size")
-  local width = size and size.columns or 80
-  local height = size and size.rows
+  local width, height
+  if reported then
+    width, height = reported.columns, reported.rows
+  else
+    local size = rex.block_id and block_call(rex.session_id, rex.block_id, "size")
+    width, height = size and size.columns or 80, size and size.rows
+  end
 
   local rows = {}
   for block_id, b in pairs(blocks) do
@@ -142,17 +158,23 @@ local function draw()
     end
   end
 
-  -- Each line clears its row before writing, rather than after: a line that
-  -- fills the last column leaves the cursor there, and erasing from it would
-  -- remove the line's last character.
+  -- Only lines that changed are written, unless the size changed. Each line
+  -- clears its row before writing, rather than after: a line that fills the
+  -- last column leaves the cursor there, and erasing from it would remove the
+  -- line's last character.
+  local full = not drawn or drawn.width ~= width or drawn.height ~= height
+  local old = full and {} or drawn.lines
   local out = {}
+  if full then out[1] = "\27[2J" end
   for i, line in ipairs(lines) do
-    out[#out + 1] = "\27[" .. i .. ";1H\27[2K" .. line
+    if line ~= old[i] then out[#out + 1] = "\27[" .. i .. ";1H\27[2K" .. line end
   end
-  if not height or #lines < height then
-    out[#out + 1] = "\27[" .. (#lines + 1) .. ";1H\27[J"
+  for i = #lines + 1, #old do
+    out[#out + 1] = "\27[" .. i .. ";1H\27[2K"
   end
-  io.write(table.concat(out))
+  drawn = { width = width, height = height, lines = lines }
+  if #out == 0 then return end
+  io.write(SYNC_START, table.concat(out), SYNC_END)
   io.flush()
 end
 
@@ -205,6 +227,12 @@ end
 local function read_keys(file)
   local data = file:read("*a")
   if not data or data == "" then return end
+  local resized
+  for rows, columns in data:gmatch("\27%[48;(%d+);(%d+)[;%d]*t") do
+    reported = { rows = tonumber(rows), columns = tonumber(columns) }
+    resized = true
+  end
+  if resized then draw() end
   for button, _, y, kind in data:gmatch("\27%[<(%d+);(%d+);(%d+)([Mm])") do
     local row = clickable[tonumber(y)]
     if kind == "M" and button == "0" and row then jump(row) end
@@ -280,7 +308,7 @@ rex.every(TICK, schedule)
 
 local key_file = start_key_reader()
 if key_file then
-  io.write("\27[?1000h\27[?1006h")
+  io.write(SCREEN_ON)
   io.flush()
   rex.every(KEY_POLL, function() read_keys(key_file) end)
 end
