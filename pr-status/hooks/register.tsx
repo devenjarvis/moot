@@ -50,6 +50,7 @@ let inFlight: Promise<void> | null = null
 let isFullRun = false
 let wantFull = true
 let quiet = 0
+let finishedSince: number | null = null
 
 const firstLine = (text: string) => text.trim().split('\n')[0] ?? ''
 const keyOf = (pr: Pr) => `${pr.repo}#${pr.number}`
@@ -274,17 +275,24 @@ async function refreshNow($: EngineInterface) {
   const fresh = open.filter(pr => !known.includes(keyOf(pr)))
   await update($, seen, list => [...new Set([...list, ...all.map(keyOf)])])
 
+  const now = await $.clock.now()
+  const pane = (await $.ui.panes()).find(one => one.id === PANE)
   if (open.length > 0) {
-    const isUp = (await $.ui.panes()).some(pane => pane.id === PANE)
+    finishedSince = null
     const wasDismissed = await read($, dismissed)
-    if (!isUp && (!wasDismissed || fresh.length > 0)) {
+    if (!pane && (!wasDismissed || fresh.length > 0)) {
       await update($, dismissed, () => false)
       await $.ui.open({ id: PANE, title: TITLE, columns: 72 })
+    }
+  } else if (all.length > 0 && pane) {
+    finishedSince ??= now
+    if (now - finishedSince >= IDLE_MS && !pane.isFocused) {
+      finishedSince = null
+      await $.ui.close({ id: PANE })
     }
   }
   const isSame = JSON.stringify(previous?.groups ?? null) === JSON.stringify(next.groups)
   quiet = !isFullRun && isSame && open.length > 0 ? quiet + 1 : 0
-  const now = await $.clock.now()
   schedule($, nextDelay({ isDismissed: await read($, dismissed), hasOpen: open.length > 0, quiet, rate, now }))
 }
 
